@@ -45,6 +45,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(401).json({ error: 'unauthorized' })
     }
     const force = String(req.query.force ?? '') === 'true'
+    const clear = String(req.query.clear ?? '') === 'true'
 
     try {
       initAdmin()
@@ -76,6 +77,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!settingsSnap.exists) { skipped.push({ uid, reason: 'no-settings' }); continue }
         const prefs = settingsSnap.data() as Prefs
         if (!prefs.reminders?.enabled) { skipped.push({ uid, reason: 'reminders-disabled' }); continue }
+
+        if (clear) {
+          await settingsSnap.ref.update({ lastNotifiedOn: '' })
+          skipped.push({ uid, reason: 'cleared' })
+          continue
+        }
         const tz = prefs.timezone || DEFAULT_TZ
 
         const localIso = formatInTimeZone(nowUtc, tz, 'yyyy-MM-dd')
