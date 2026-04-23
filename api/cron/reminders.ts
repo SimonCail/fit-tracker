@@ -56,26 +56,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const messaging = getMessaging()
     const nowUtc = new Date()
 
-    let snap
+    // Iterate users directly to avoid needing a collectionGroup index.
+    let userRefs
     try {
-      snap = await db.collectionGroup('settings').where('reminders.enabled', '==', true).get()
+      userRefs = await db.collection('users').listDocuments()
     } catch (e) {
-      console.error('[reminders] collectionGroup query failed', e)
-      return res.status(500).json({
-        error: 'query failed',
-        detail: String(e),
-        hint: 'If the error mentions an index, open the URL shown in it to create the single-field exemption for the collection group.',
-      })
+      console.error('[reminders] list users failed', e)
+      return res.status(500).json({ error: 'list users failed', detail: String(e) })
     }
 
     const results: { uid: string; sent: number; total: number; plan?: string }[] = []
     const skipped: { uid: string; reason: string }[] = []
 
-    for (const doc of snap.docs) {
-      const uid = doc.ref.parent.parent?.id
-      if (!uid) continue
+    for (const userRef of userRefs) {
+      const uid = userRef.id
       try {
-        const prefs = doc.data() as Prefs
+        const settingsSnap = await userRef.collection('settings').doc('main').get()
+        if (!settingsSnap.exists) { skipped.push({ uid, reason: 'no-settings' }); continue }
+        const prefs = settingsSnap.data() as Prefs
+        if (!prefs.reminders?.enabled) { skipped.push({ uid, reason: 'reminders-disabled' }); continue }
         const tz = prefs.timezone || DEFAULT_TZ
 
         const localIso = formatInTimeZone(nowUtc, tz, 'yyyy-MM-dd')
@@ -135,7 +134,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           await Promise.all(invalid.map(t => db.doc(`users/${uid}/fcmTokens/${t}`).delete()))
         }
 
-        await doc.ref.update({ lastNotifiedOn: localIso })
+        await settingsSnap.ref.update({ lastNotifiedOn: localIso })
         results.push({ uid, sent: r.successCount, total: tokens.length, plan: plan ?? undefined })
       } catch (e) {
         console.error(`[reminders] user ${uid} failed`, e)
@@ -147,7 +146,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ok: true,
       at: nowUtc.toISOString(),
       notified: results.length,
-      users_processed: snap.size,
+      users_processed: userRefs.length,
       results,
       skipped,
     })
