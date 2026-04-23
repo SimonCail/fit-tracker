@@ -444,10 +444,10 @@ function WeightSlotRow({
 
   if (entry) {
     return (
-      <div className="group flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-[color:var(--color-surface-2)]/60 transition-colors">
-        <span className="text-[color:var(--color-text-dim)]">{icon}</span>
-        <span className="text-xs text-[color:var(--color-text-dim)] w-10 uppercase tracking-widest font-medium">{label}</span>
-        <span className="font-display text-lg tabular flex-1">
+      <div className="group flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-[color:var(--color-surface-2)]/60 transition-colors">
+        <span className="text-[color:var(--color-text-dim)] shrink-0">{icon}</span>
+        <span className="text-xs text-[color:var(--color-text-dim)] w-10 shrink-0 uppercase tracking-widest font-medium">{label}</span>
+        <span className="font-display text-lg tabular flex-1 min-w-0 truncate">
           {round(fromKg(entry.weight, unit), 1)}
           <span className="text-xs text-[color:var(--color-text-dim)] ml-1">{unit}</span>
         </span>
@@ -455,7 +455,7 @@ function WeightSlotRow({
           <TooltipTrigger asChild>
             <button
               onClick={open}
-              className="p-1.5 rounded-full text-[color:var(--color-text-dim)] hover:text-[color:var(--color-text)] hover:bg-[color:var(--color-surface)] transition-colors cursor-pointer opacity-60 group-hover:opacity-100"
+              className="p-1.5 rounded-full text-[color:var(--color-text-dim)] hover:text-[color:var(--color-text)] hover:bg-[color:var(--color-surface)] transition-colors cursor-pointer opacity-60 group-hover:opacity-100 shrink-0"
               aria-label="Modifier"
             >
               <Pencil size={13} />
@@ -467,7 +467,7 @@ function WeightSlotRow({
           <TooltipTrigger asChild>
             <button
               onClick={remove}
-              className="p-1.5 rounded-full text-[color:var(--color-text-dim)] hover:text-[color:var(--color-danger)] hover:bg-[color:var(--color-danger)]/10 transition-colors cursor-pointer opacity-60 group-hover:opacity-100"
+              className="p-1.5 rounded-full text-[color:var(--color-text-dim)] hover:text-[color:var(--color-danger)] hover:bg-[color:var(--color-danger)]/10 transition-colors cursor-pointer opacity-60 group-hover:opacity-100 shrink-0"
               aria-label="Supprimer"
             >
               <X size={13} />
