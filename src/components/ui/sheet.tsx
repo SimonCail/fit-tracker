@@ -28,7 +28,7 @@ export const SheetContent = forwardRef<ElementRef<typeof DialogPrimitive.Content
         )}
         {...props}
       >
-        <DialogPrimitive.Close className="absolute top-4 right-4 z-10 rounded-full p-2 text-[color:var(--color-text-dim)] hover:text-[color:var(--color-text)] hover:bg-[color:var(--color-surface-2)] transition-colors">
+        <DialogPrimitive.Close className="absolute top-[calc(env(safe-area-inset-top,0px)+1rem)] right-4 z-10 rounded-full p-2 text-[color:var(--color-text-dim)] hover:text-[color:var(--color-text)] hover:bg-[color:var(--color-surface-2)] transition-colors cursor-pointer">
           <X size={20} />
           <span className="sr-only">Fermer</span>
         </DialogPrimitive.Close>
@@ -44,7 +44,7 @@ export function SheetHeader({ children, className }: { children: ReactNode; clas
   return (
     <div
       className={cn(
-        'px-6 pt-8 pb-4 border-b border-[color:var(--color-border)]',
+        'px-6 pb-4 border-b border-[color:var(--color-border)] pt-[calc(env(safe-area-inset-top,0px)+2rem)]',
         className,
       )}
     >

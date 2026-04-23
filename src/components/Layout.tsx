@@ -20,8 +20,8 @@ export function Layout() {
 
   return (
     <div className="min-h-[100dvh] flex flex-col">
-      {/* Liquid glass floating header */}
-      <div className="sticky top-0 z-30 pointer-events-none">
+      {/* Top bar: desktop only (sm+). On mobile we use a bottom tab bar exclusively. */}
+      <div className="sticky top-0 z-30 pointer-events-none hidden sm:block">
         <div className="safe-top pt-3 pb-3 px-3">
           <div className="max-w-xl mx-auto pointer-events-auto">
             <div className="liquid-glass rounded-full pl-3 pr-2 h-14 flex items-center gap-2">
@@ -29,7 +29,7 @@ export function Layout() {
                 <div className="w-8 h-8 rounded-xl bg-[color:var(--color-text)] text-[color:var(--color-bg)] flex items-center justify-center group-hover:bg-[color:var(--color-accent)] group-hover:text-[color:var(--color-accent-text)] group-hover:rotate-[-8deg] transition-all duration-300">
                   <Dumbbell size={16} />
                 </div>
-                <span className="font-display text-lg tracking-tight hidden sm:block">Fit</span>
+                <span className="font-display text-lg tracking-tight">Fit</span>
               </Link>
               {!onSessionRoute && (
                 <nav className="flex-1 flex justify-center">
@@ -75,17 +75,17 @@ export function Layout() {
         </div>
       </div>
 
-      <main className="flex-1 max-w-xl w-full mx-auto px-4 pb-28">
+      <main className="flex-1 max-w-xl w-full mx-auto px-4 pb-28 pt-4 sm:pt-0 safe-top sm:[padding-top:0]">
         <Outlet />
       </main>
 
       <SettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} />
-      <MobileTabBar loc={loc.pathname} />
+      <MobileTabBar loc={loc.pathname} onSettingsClick={() => setSettingsOpen(true)} />
     </div>
   )
 }
 
-function MobileTabBar({ loc }: { loc: string }) {
+function MobileTabBar({ loc, onSettingsClick }: { loc: string; onSettingsClick: () => void }) {
   if (loc.startsWith('/session/')) return null
   const tabs = [
     { to: '/', icon: Clock, end: true, label: "Aujourd'hui" },
@@ -122,6 +122,13 @@ function MobileTabBar({ loc }: { loc: string }) {
               </Link>
             )
           })}
+          <button
+            onClick={onSettingsClick}
+            aria-label="Réglages"
+            className="flex-1 h-12 flex items-center justify-center rounded-full text-[color:var(--color-text-dim)] hover:text-[color:var(--color-text)] transition-colors cursor-pointer"
+          >
+            <Settings size={18} />
+          </button>
         </div>
       </div>
     </nav>
