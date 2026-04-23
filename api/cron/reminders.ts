@@ -116,18 +116,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (!claimed) { skipped.push({ uid, reason: 'race-lost' }); continue }
         }
 
+        // Data-only payload so the browser does NOT auto-display a notification.
+        // Our service worker (firebase-messaging-sw.js) handles the display itself via onBackgroundMessage.
         const message: MulticastMessage = {
           tokens,
-          notification: {
+          data: {
             title: "Ta séance t'attend",
             body: `${DAY_LABELS[dayKey]} : ${plan}. Il est encore temps.`,
+            day: dayKey,
+            plan,
           },
           webpush: {
-            notification: {
-              icon: '/pwa-192x192.png',
-              badge: '/pwa-192x192.png',
-              tag: 'fit-tracker-reminder',
-            },
+            headers: { Urgency: 'high' },
             fcmOptions: { link: '/' },
           },
         }

@@ -16,14 +16,19 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging()
 
+// We receive data-only FCM payloads (see api/cron/reminders.ts).
+// The browser does NOT auto-display for data-only messages, so we show the notification here ourselves —
+// exactly once per push.
 messaging.onBackgroundMessage(payload => {
-  const title = payload.notification?.title || 'Fit Tracker'
+  const data = payload.data || {}
+  const title = data.title || payload.notification?.title || 'Fit Tracker'
+  const body = data.body || payload.notification?.body || ''
   const options = {
-    body: payload.notification?.body || '',
+    body,
     icon: '/pwa-192x192.png',
     badge: '/pwa-192x192.png',
     tag: 'fit-tracker-reminder',
-    data: payload.data || {},
+    data,
     requireInteraction: false,
   }
   return self.registration.showNotification(title, options)
