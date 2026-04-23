@@ -86,6 +86,29 @@ input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 input[type="number"] { -moz-appearance: textfield; }
 
+/* Ensure typed text is always visible — Chrome autofill + WebKit quirks. */
+input, textarea {
+  caret-color: var(--color-accent);
+}
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px var(--color-surface) inset !important;
+  -webkit-text-fill-color: var(--color-text) !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+/* Chrome's native date/time picker icon in dark mode */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+  cursor: pointer;
+}
+html:not(.dark) input[type="date"]::-webkit-calendar-picker-indicator,
+html:not(.dark) input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: none;
+}
+
 .safe-top { padding-top: max(env(safe-area-inset-top), 0.5rem); }
 .safe-bottom { padding-bottom: max(env(safe-area-inset-bottom), 1rem); }
 

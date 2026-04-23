@@ -554,14 +554,14 @@ function DatePickerModal({
           <QuickDate label="Aujourd'hui" value={todayIso()} current={date} onChange={setDate} />
           <QuickDate label="Hier" value={yesterdayIso()} current={date} onChange={setDate} />
         </div>
-        <div className="mt-3">
+        <div className="mt-3 min-w-0">
           <Label className="block mb-2">Autre date</Label>
           <Input
             type="date"
             value={date}
             onChange={e => setDate(e.target.value)}
             max={todayIso()}
-            className="h-11"
+            className="h-11 w-full min-w-0"
           />
         </div>
 

@@ -15,7 +15,7 @@ export const ModalContent = forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        'fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-w-md bg-[color:var(--color-surface)] border border-[color:var(--color-border)] rounded-3xl shadow-2xl p-6 data-[state=open]:animate-modal-in data-[state=closed]:animate-modal-out',
+        'fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 w-[calc(100vw-1.5rem)] max-w-md bg-[color:var(--color-surface)] border border-[color:var(--color-border)] rounded-3xl shadow-2xl p-5 sm:p-6 data-[state=open]:animate-modal-in data-[state=closed]:animate-modal-out',
         className,
       )}
       {...props}
