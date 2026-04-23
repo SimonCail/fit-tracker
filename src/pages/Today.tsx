@@ -387,10 +387,14 @@ function WeightSlotRow({
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
-    if (!value) return
+    const n = Number(value)
+    if (!value || Number.isNaN(n) || n <= 0) return
+    // Clamp to a sane body-weight range to avoid absurd entries.
+    const kg = toKg(n, unit)
+    if (kg < 20 || kg > 400) return
     setSaving(true)
     try {
-      await setWeighIn(date, slot, toKg(Number(value), unit))
+      await setWeighIn(date, slot, kg)
       setEditing(false)
       onChanged()
     } finally {
@@ -420,7 +424,8 @@ function WeightSlotRow({
           <Input
             type="number"
             step="0.1"
-            min="0"
+            min="20"
+            max="400"
             value={value}
             onChange={e => setValue(e.target.value)}
             autoFocus
