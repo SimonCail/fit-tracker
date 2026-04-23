@@ -44,6 +44,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!secret || auth !== `Bearer ${secret}`) {
       return res.status(401).json({ error: 'unauthorized' })
     }
+    const force = String(req.query.force ?? '') === 'true'
 
     try {
       initAdmin()
@@ -94,14 +95,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const diffMinutes = nowMinutes - reminderMinutes
         if (diffMinutes < 0 || diffMinutes > WINDOW_MINUTES) { skipped.push({ uid, reason: 'out-of-window' }); continue }
 
-        if (prefs.lastNotifiedOn === localIso) { skipped.push({ uid, reason: 'already-notified' }); continue }
+        if (!force && prefs.lastNotifiedOn === localIso) { skipped.push({ uid, reason: 'already-notified' }); continue }
 
         const sessSnap = await db.collection(`users/${uid}/sessions`).where('date', '==', localIso).limit(1).get()
         if (!sessSnap.empty) { skipped.push({ uid, reason: 'session-exists' }); continue }
 
         const toksSnap = await db.collection(`users/${uid}/fcmTokens`).get()
-        const tokens = toksSnap.docs.map(t => t.id)
+        const tokens = Array.from(new Set(toksSnap.docs.map(t => t.id)))
         if (tokens.length === 0) { skipped.push({ uid, reason: 'no-tokens' }); continue }
+
+        // Atomic claim: only ONE concurrent execution gets to send, others skip.
+        if (!force) {
+          const claimed = await db.runTransaction(async tx => {
+            const snap = await tx.get(settingsSnap.ref)
+            const curr = snap.data() as Prefs | undefined
+            if (curr?.lastNotifiedOn === localIso) return false
+            tx.update(settingsSnap.ref, { lastNotifiedOn: localIso })
+            return true
+          })
+          if (!claimed) { skipped.push({ uid, reason: 'race-lost' }); continue }
+        }
 
         const message: MulticastMessage = {
           tokens,
@@ -134,7 +147,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           await Promise.all(invalid.map(t => db.doc(`users/${uid}/fcmTokens/${t}`).delete()))
         }
 
-        await settingsSnap.ref.update({ lastNotifiedOn: localIso })
         results.push({ uid, sent: r.successCount, total: tokens.length, plan: plan ?? undefined })
       } catch (e) {
         console.error(`[reminders] user ${uid} failed`, e)
