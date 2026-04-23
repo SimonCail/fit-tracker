@@ -412,9 +412,9 @@ function WeightSlotRow({
 
   if (editing) {
     return (
-      <form onSubmit={save} className="flex items-center gap-2 bg-[color:var(--color-surface-2)] rounded-xl p-2">
-        <span className="text-[color:var(--color-text-dim)] pl-1">{icon}</span>
-        <span className="text-xs text-[color:var(--color-text-dim)] w-10">{label}</span>
+      <form onSubmit={save} className="flex items-center gap-2 p-1">
+        <span className="text-[color:var(--color-text-dim)] pl-2">{icon}</span>
+        <span className="text-[10px] text-[color:var(--color-text-dim)] w-10 uppercase tracking-widest font-medium">{label}</span>
         <div className="relative flex-1">
           <Input
             type="number"
@@ -425,17 +425,17 @@ function WeightSlotRow({
             autoFocus
             inputMode="decimal"
             placeholder="0.0"
-            className="h-9 pr-10"
+            className="h-11 pr-10 text-base font-medium text-[color:var(--color-text)] [-webkit-text-fill-color:var(--color-text)]"
           />
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium">
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium pointer-events-none">
             {unit}
           </span>
         </div>
-        <Button type="submit" variant="accent" size="icon-sm" disabled={saving || !value} aria-label="Enregistrer">
-          <Check size={14} />
+        <Button type="submit" variant="accent" size="icon" disabled={saving || !value} aria-label="Enregistrer">
+          <Check size={16} />
         </Button>
-        <Button type="button" variant="ghost" size="icon-sm" onClick={() => setEditing(false)} aria-label="Annuler">
-          <X size={14} />
+        <Button type="button" variant="ghost" size="icon" onClick={() => setEditing(false)} aria-label="Annuler">
+          <X size={16} />
         </Button>
       </form>
     )
