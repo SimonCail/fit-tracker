@@ -52,10 +52,30 @@ export function History() {
     let filtered = all
     if (dayFilter) filtered = filtered.filter(it => it.data.date === dayFilter)
     if (!query.trim()) return filtered
-    const q = query.toLowerCase()
+    const q = query.toLowerCase().trim()
     return filtered.filter(it => {
-      if (it.kind === 'session') return (it.data.notes ?? '').toLowerCase().includes(q)
-      return String(it.data.weight).includes(q) || (it.data.note ?? '').toLowerCase().includes(q)
+      if (it.kind === 'session') {
+        const s = it.data
+        const parts: string[] = []
+        parts.push(s.notes ?? '')
+        parts.push(s.type === 'running' ? 'course running' : 'muscu musculation')
+        parts.push(s.date) // allow searching by ISO date e.g. "2026-04"
+        parts.push(format(parseISO(s.date), 'd MMMM yyyy EEEE', { locale: fr }))
+        for (const ex of s.exercises) parts.push(ex.name)
+        if (s.route) parts.push(s.route)
+        if (s.distanceMeters) parts.push(`${Math.round(s.distanceMeters / 100) / 10} km`)
+        return parts.join(' ').toLowerCase().includes(q)
+      }
+      const w = it.data
+      const parts: string[] = []
+      parts.push(String(w.weight))
+      parts.push(`${w.weight} kg`)
+      parts.push(w.note ?? '')
+      parts.push(w.slot === 'morning' ? 'matin' : w.slot === 'evening' ? 'soir' : '')
+      parts.push('pesée poids')
+      parts.push(w.date)
+      parts.push(format(parseISO(w.date), 'd MMMM yyyy EEEE', { locale: fr }))
+      return parts.join(' ').toLowerCase().includes(q)
     })
   }, [sessions, weighIns, query, dayFilter])
 
@@ -94,7 +114,7 @@ export function History() {
         <Input
           value={query}
           onChange={e => setQuery(e.target.value)}
-          placeholder="Rechercher…"
+          placeholder="Rechercher (exo, parcours, date, pesée…)"
           className="pl-10"
         />
       </div>
