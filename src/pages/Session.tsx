@@ -244,10 +244,24 @@ function ExerciseCard({
     setWeight(String(round(fromKg(Number(lastSet.weight), unit), 1)))
   }
 
+  // Find the FIRST occurrence of the top weight (don't decorate every tie).
+  const topSetId = useMemo(() => {
+    if (!bestPreview) return null
+    const first = exercise.sets.find(s => Number(s.weight) === bestKg)
+    return first?.id ?? null
+  }, [exercise.sets, bestKg, bestPreview])
+
   return (
     <Card className="p-5">
-      <div className="flex items-baseline justify-between mb-1">
-        <span className="font-display text-[color:var(--color-text-dim)] tabular text-sm">#{String(index).padStart(2, '0')}</span>
+      <header className="flex items-start justify-between gap-3 mb-1">
+        <div className="flex items-baseline gap-2 min-w-0">
+          <span className="font-mono text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)]">#{String(index).padStart(2, '0')}</span>
+          {previousPR > 0 && bestKg > previousPR && (
+            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-[color:var(--color-accent)] font-semibold">
+              <Trophy size={10} /> PR
+            </span>
+          )}
+        </div>
         <Tooltip>
           <TooltipTrigger asChild>
             <button
@@ -262,81 +276,102 @@ function ExerciseCard({
                 await deleteExercise(sessionId, exercise.id)
                 onChange()
               }}
-              className="p-1.5 rounded-full text-[color:var(--color-text-dim)] hover:text-[color:var(--color-danger)] hover:bg-[color:var(--color-danger)]/10 transition-colors cursor-pointer"
+              className="p-1.5 -m-1.5 rounded-full text-[color:var(--color-text-dim)] hover:text-[color:var(--color-danger)] hover:bg-[color:var(--color-danger)]/10 transition-colors cursor-pointer shrink-0"
               aria-label="Supprimer l'exercice"
             >
               <Trash2 size={14} />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="left">Supprimer</TooltipContent>
+          <TooltipContent side="left">Supprimer l'exercice</TooltipContent>
         </Tooltip>
-      </div>
+      </header>
       <h3 className="font-display text-2xl leading-tight">{exercise.name}</h3>
 
       {bestPreview && (
-        <div className="flex items-center gap-3 mt-2 text-xs text-[color:var(--color-text-dim)]">
-          <span>Top: {bestPreview.set.reps} × {formatWeight(Number(bestPreview.set.weight), unit, 1)}</span>
-          <span className="opacity-60">·</span>
-          <span>1RM ≈ {formatWeight(bestPreview.oneRm, unit, 0)}</span>
-          {previousPR > 0 && bestKg > previousPR && (
-            <span className="text-[color:var(--color-accent)] font-medium flex items-center gap-1">
-              <Trophy size={12} /> PR
-            </span>
-          )}
+        <div className="grid grid-cols-3 gap-2 mt-3 mb-4 text-xs">
+          <MiniStat label="Top" value={`${bestPreview.set.reps}×${round(fromKg(Number(bestPreview.set.weight), unit), 1)}`} />
+          <MiniStat label="1RM estimé" value={`${Math.round(fromKg(bestPreview.oneRm, unit))}`} suffix={unit} />
+          <MiniStat label="Séries" value={String(exercise.sets.length)} />
         </div>
       )}
 
       {exercise.sets.length > 0 && (
-        <div className="mt-4 space-y-1">
-          {exercise.sets.map((set, i) => (
-            <SetRow
-              key={set.id}
-              sessionId={sessionId}
-              exerciseId={exercise.id}
-              index={i + 1}
-              set={set}
-              unit={unit}
-              isTop={Number(set.weight) === bestKg}
-              onChange={onChange}
-            />
-          ))}
+        <div className="mt-2">
+          <div className="grid grid-cols-[2rem_1fr_1fr_2rem] items-center gap-2 px-2 pb-1.5 border-b border-[color:var(--color-border)] text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium">
+            <span>#</span>
+            <span className="text-center">Reps</span>
+            <span className="text-center">{unit}</span>
+            <span />
+          </div>
+          <div className="divide-y divide-[color:var(--color-border)]">
+            {exercise.sets.map((set, i) => (
+              <SetRow
+                key={set.id}
+                sessionId={sessionId}
+                exerciseId={exercise.id}
+                index={i + 1}
+                set={set}
+                unit={unit}
+                isTop={set.id === topSetId}
+                onChange={onChange}
+              />
+            ))}
+          </div>
         </div>
       )}
 
-      <form onSubmit={onAddSet} className="mt-4 flex gap-2">
-        <Input
-          type="number"
-          placeholder="reps"
-          value={reps}
-          onChange={e => setReps(e.target.value)}
-          min="0"
-          inputMode="numeric"
-          className="flex-1 text-center font-display text-lg"
-        />
-        <Input
-          type="number"
-          step="0.5"
-          placeholder={unit}
-          value={weight}
-          onChange={e => setWeight(e.target.value)}
-          min="0"
-          inputMode="decimal"
-          className="flex-1 text-center font-display text-lg"
-        />
-        <Button type="submit" variant="accent" disabled={adding || !reps || !weight}>
-          <Plus size={16} />
+      <form onSubmit={onAddSet} className="mt-4 grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
+        <div className="relative">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium pointer-events-none">reps</span>
+          <Input
+            type="number"
+            value={reps}
+            onChange={e => setReps(e.target.value)}
+            min="0"
+            inputMode="numeric"
+            className="h-11 pl-14 text-right font-display text-lg tabular"
+            placeholder="0"
+          />
+        </div>
+        <div className="relative">
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium pointer-events-none">{unit}</span>
+          <Input
+            type="number"
+            step="0.5"
+            value={weight}
+            onChange={e => setWeight(e.target.value)}
+            min="0"
+            inputMode="decimal"
+            className="h-11 pr-10 text-right font-display text-lg tabular"
+            placeholder="0.0"
+          />
+        </div>
+        <Button type="submit" variant="accent" size="icon" disabled={adding || !reps || !weight} aria-label="Ajouter la série">
+          <Plus size={18} />
         </Button>
       </form>
       {lastSet && !reps && !weight && (
         <button
           type="button"
           onClick={reuseLast}
-          className="text-xs text-[color:var(--color-text-dim)] hover:text-[color:var(--color-accent)] mt-2 transition-colors cursor-pointer inline-flex items-center gap-1"
+          className="text-xs text-[color:var(--color-text-dim)] hover:text-[color:var(--color-accent)] mt-3 transition-colors cursor-pointer inline-flex items-center gap-1"
         >
           ↻ Reprendre {lastSet.reps} × {formatWeight(Number(lastSet.weight), unit, 1)}
         </button>
       )}
     </Card>
+  )
+}
+
+function MiniStat({ label, value, suffix }: { label: string; value: string; suffix?: string }) {
+  return (
+    <div className="rounded-xl bg-[color:var(--color-surface-2)]/60 border border-[color:var(--color-border)] px-3 py-2">
+      <p className="text-[9px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium">{label}</p>
+      <p className="font-display tabular text-sm leading-tight mt-0.5">
+        {value}
+        {suffix && <span className="text-[color:var(--color-text-dim)] text-[10px] ml-0.5">{suffix}</span>}
+      </p>
+    </div>
   )
 }
 
@@ -374,14 +409,34 @@ function SetRow({
 
   if (editing) {
     return (
-      <div className="flex items-center gap-2 bg-[color:var(--color-surface-2)] rounded-2xl p-2">
-        <span className="text-xs font-mono tabular text-[color:var(--color-text-dim)] w-8 text-center">{String(index).padStart(2, '0')}</span>
-        <Input type="number" value={reps} onChange={e => setReps(e.target.value)} className="h-9 text-center" inputMode="numeric" />
-        <span className="text-[color:var(--color-text-dim)] text-sm">×</span>
-        <Input type="number" step="0.5" value={weight} onChange={e => setWeight(e.target.value)} className="h-9 text-center" inputMode="decimal" />
-        <Button variant="accent" size="icon-sm" onClick={save}>
-          <Check size={14} />
-        </Button>
+      <div className="grid grid-cols-[2rem_1fr_1fr_2rem] items-center gap-2 py-1.5 px-2 bg-[color:var(--color-accent-soft)] rounded-lg -mx-2">
+        <span className="text-[10px] font-mono tabular text-[color:var(--color-text-dim)] text-center">{String(index).padStart(2, '0')}</span>
+        <Input
+          type="number"
+          value={reps}
+          onChange={e => setReps(e.target.value)}
+          className="h-9 text-center font-display text-base tabular px-2"
+          inputMode="numeric"
+          autoFocus
+        />
+        <Input
+          type="number"
+          step="0.5"
+          value={weight}
+          onChange={e => setWeight(e.target.value)}
+          className="h-9 text-center font-display text-base tabular px-2"
+          inputMode="decimal"
+        />
+        <div className="flex items-center justify-end gap-1">
+          <button
+            type="button"
+            onClick={save}
+            className="p-1.5 rounded-full bg-[color:var(--color-accent)] text-[color:var(--color-accent-text)] hover:bg-[color:var(--color-accent-hover)] transition-colors cursor-pointer"
+            aria-label="Enregistrer"
+          >
+            <Check size={12} />
+          </button>
+        </div>
       </div>
     )
   }
@@ -389,31 +444,28 @@ function SetRow({
   return (
     <div
       onClick={() => setEditing(true)}
-      className="group flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-[color:var(--color-surface-2)] cursor-pointer border border-transparent hover:border-[color:var(--color-border)] transition-all duration-200"
+      className="group grid grid-cols-[2rem_1fr_1fr_2rem] items-center gap-2 py-2.5 px-2 hover:bg-[color:var(--color-surface-2)]/60 cursor-pointer transition-colors"
       role="button"
       tabIndex={0}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditing(true) } }}
     >
-      <span className="text-xs font-mono tabular text-[color:var(--color-text-dim)] w-8 text-center">
+      <span className="text-[10px] font-mono tabular text-[color:var(--color-text-dim)] text-center">
         {String(index).padStart(2, '0')}
       </span>
-      <span className="font-display text-xl tabular leading-none">{set.reps}</span>
-      <span className="text-[color:var(--color-text-dim)] text-xs mt-1">reps</span>
-      <span className="text-[color:var(--color-text-dim)] mx-1">·</span>
-      <span className="font-display text-xl tabular leading-none">{round(fromKg(Number(set.weight), unit), 1)}</span>
-      <span className="text-[color:var(--color-text-dim)] text-xs mt-1">{unit}</span>
-      {isTop && (
-        <span className="ml-2 text-[color:var(--color-accent)]">
-          <Trophy size={12} />
-        </span>
-      )}
-      <button
-        onClick={e => { e.stopPropagation(); remove() }}
-        className="ml-auto p-1.5 rounded-full text-[color:var(--color-text-dim)] hover:text-[color:var(--color-danger)] hover:bg-[color:var(--color-danger)]/10 opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
-        aria-label="Supprimer la série"
-      >
-        <Trash2 size={12} />
-      </button>
+      <span className="font-display text-lg tabular text-center leading-none">{set.reps}</span>
+      <span className="font-display text-lg tabular text-center leading-none">
+        {round(fromKg(Number(set.weight), unit), 1)}
+        {isTop && <Trophy size={12} className="inline-block ml-1.5 -mt-1 text-[color:var(--color-accent)]" />}
+      </span>
+      <div className="flex items-center justify-end">
+        <button
+          onClick={e => { e.stopPropagation(); remove() }}
+          className="p-1.5 rounded-full text-[color:var(--color-text-dim)]/60 hover:text-[color:var(--color-danger)] hover:bg-[color:var(--color-danger)]/10 transition-all cursor-pointer"
+          aria-label="Supprimer la série"
+        >
+          <Trash2 size={12} />
+        </button>
+      </div>
     </div>
   )
 }
