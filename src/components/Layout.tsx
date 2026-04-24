@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { Settings, Dumbbell, LineChart, Clock } from 'lucide-react'
+import { Settings, Dumbbell, LineChart, Clock, Library } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { Button, Tooltip, TooltipContent, TooltipTrigger } from './ui'
 import { SettingsSheet } from './Settings'
@@ -14,6 +14,7 @@ export function Layout() {
     { to: '/', label: "Aujourd'hui", end: true },
     { to: '/history', label: 'Historique' },
     { to: '/evolution', label: 'Évolution' },
+    { to: '/exercises', label: 'Exos' },
   ]
 
   return (
@@ -85,6 +86,7 @@ function MobileTabBar({ loc, onSettingsClick }: { loc: string; onSettingsClick: 
     { to: '/', icon: Clock, end: true, label: "Aujourd'hui" },
     { to: '/history', icon: Dumbbell, label: 'Historique' },
     { to: '/evolution', icon: LineChart, label: 'Évolution' },
+    { to: '/exercises', icon: Library, label: 'Exos' },
   ]
   return (
     <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-20 pointer-events-none">

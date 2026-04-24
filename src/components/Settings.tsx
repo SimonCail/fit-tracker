@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { signOut } from 'firebase/auth'
-import { AlertTriangle, Bell, CalendarRange, Check, Download, Dumbbell, LogOut, Monitor, Moon, Sun } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { AlertTriangle, Bell, CalendarRange, Check, Download, LogOut, Monitor, Moon, Sun } from 'lucide-react'
 import { auth } from '../lib/firebase'
 import { Button, Input, Label, Sheet, SheetBody, SheetContent, SheetHeader, Switch } from './ui'
 import { DAY_KEYS, DAY_LABELS, useSettings, type Theme } from '../store/settings'
@@ -218,20 +217,6 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
                 Le rappel apparaît quand tu reviens sur l'app après l'heure prévue (limitation navigateur sans backend).
               </p>
             )}
-          </Section>
-
-          <Section title="Exercices" icon={<Dumbbell size={12} />}>
-            <Link
-              to="/exercises"
-              onClick={() => onOpenChange(false)}
-              className="flex items-center justify-between p-3 rounded-xl border-2 border-[color:var(--color-border)] hover:border-[color:var(--color-border-strong)] hover:bg-[color:var(--color-surface-2)]/50 transition-colors cursor-pointer"
-            >
-              <span className="text-sm">Bibliothèque & fusion des variantes</span>
-              <span className="text-[color:var(--color-text-dim)]">→</span>
-            </Link>
-            <p className="text-[10px] text-[color:var(--color-text-dim)] mt-2 leading-relaxed">
-              Renomme un exercice partout d'un coup, fusionne les fautes de frappe.
-            </p>
           </Section>
 
           <Section title="Données">
