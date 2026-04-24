@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Dumbbell, Scale, ChevronRight, Search, Trash2, X, Sunrise, Moon } from 'lucide-react'
+import { Dumbbell, Footprints, Scale, ChevronRight, Search, Trash2, X, Sunrise, Moon } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { motion } from 'framer-motion'
@@ -162,20 +162,47 @@ export function History() {
 }
 
 function SessionCard({ session, unit, onClick }: { session: Session; unit: 'kg' | 'lb'; onClick: () => void }) {
-  const sets = session.exercises.reduce((n, e) => n + e.sets.length, 0)
-  const tonnage = session.exercises.reduce((n, e) => n + e.sets.reduce((m, s) => m + s.reps * Number(s.weight), 0), 0)
+  const isRunning = session.type === 'running'
+
+  let subtitle: string
+  if (isRunning) {
+    const km = (session.distanceMeters ?? 0) / 1000
+    const sec = session.durationSeconds ?? 0
+    const parts: string[] = []
+    if (km > 0) parts.push(`${Math.round(km * 10) / 10} km`)
+    if (sec > 0) {
+      const mm = Math.floor(sec / 60)
+      const ss = sec % 60
+      parts.push(mm > 0 ? `${mm}:${String(ss).padStart(2, '0')}` : `${ss}s`)
+    }
+    if (km > 0 && sec > 0) {
+      const pace = sec / km
+      parts.push(`${Math.floor(pace / 60)}:${String(Math.round(pace % 60)).padStart(2, '0')}/km`)
+    }
+    if (session.route) parts.unshift(session.route)
+    subtitle = parts.length > 0 ? parts.join(' · ') : 'Course'
+  } else {
+    const sets = session.exercises.reduce((n, e) => n + e.sets.length, 0)
+    const tonnage = session.exercises.reduce((n, e) => n + e.sets.reduce((m, s) => m + s.reps * Number(s.weight), 0), 0)
+    subtitle = `${session.exercises.length} exos · ${sets} séries · ${formatWeight(tonnage, unit, 0).replace('.0', '')}`
+  }
+
   return (
     <button
       onClick={onClick}
       className="group w-full text-left rounded-2xl bg-[color:var(--color-surface)] border border-[color:var(--color-border)] p-4 hover:border-[color:var(--color-border-strong)] hover:-translate-y-0.5 hover:shadow-[var(--shadow-soft)] active:translate-y-0 transition-all duration-200 cursor-pointer flex items-center gap-4"
     >
-      <div className="w-10 h-10 rounded-2xl bg-[color:var(--color-accent-soft)] text-[color:var(--color-accent)] flex items-center justify-center shrink-0">
-        <Dumbbell size={18} />
+      <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${
+        isRunning
+          ? 'bg-[#a78bfa]/15 text-[#a78bfa]'
+          : 'bg-[color:var(--color-accent-soft)] text-[color:var(--color-accent)]'
+      }`}>
+        {isRunning ? <Footprints size={18} /> : <Dumbbell size={18} />}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="font-medium truncate">{session.notes || 'Séance'}</p>
-        <p className="text-xs text-[color:var(--color-text-dim)] mt-0.5">
-          {session.exercises.length} exos · {sets} séries · {formatWeight(tonnage, unit, 0).replace('.0', '')}
+        <p className="font-medium truncate">{session.notes || (isRunning ? 'Course' : 'Séance')}</p>
+        <p className="text-xs text-[color:var(--color-text-dim)] mt-0.5 truncate">
+          {subtitle}
         </p>
       </div>
       <ChevronRight size={16} className="text-[color:var(--color-text-dim)] group-hover:translate-x-1 transition-transform" />

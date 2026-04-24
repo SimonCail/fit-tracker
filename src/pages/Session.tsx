@@ -603,18 +603,18 @@ function RunningSessionView({ session, onChange }: { session: Session; onChange:
         <div className="space-y-3">
           <div>
             <Label className="block mb-1.5">Distance (km)</Label>
-            <Input type="number" step="0.01" min="0" value={distanceKm} onChange={e => setDistanceKm(e.target.value)} placeholder="5.00" inputMode="decimal" />
+            <Input type="number" step="0.01" min="0" value={distanceKm} onChange={e => setDistanceKm(e.target.value)} inputMode="decimal" />
           </div>
           <div>
             <Label className="block mb-1.5">Durée</Label>
             <div className="flex items-center gap-2">
               <div className="relative flex-1">
-                <Input type="number" min="0" max="600" value={durationMin} onChange={e => setDurationMin(e.target.value)} placeholder="25" inputMode="numeric" className="pr-10" />
+                <Input type="number" min="0" max="600" value={durationMin} onChange={e => setDurationMin(e.target.value)} inputMode="numeric" className="pr-10" />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium pointer-events-none">min</span>
               </div>
               <span className="text-[color:var(--color-text-dim)]">:</span>
               <div className="relative flex-1">
-                <Input type="number" min="0" max="59" value={durationSec} onChange={e => setDurationSec(e.target.value)} placeholder="30" inputMode="numeric" className="pr-10" />
+                <Input type="number" min="0" max="59" value={durationSec} onChange={e => setDurationSec(e.target.value)} inputMode="numeric" className="pr-10" />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium pointer-events-none">sec</span>
               </div>
             </div>

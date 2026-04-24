@@ -10,15 +10,6 @@ import type { Session, WeighIn } from '../lib/types'
 import { fromKg, round } from '../lib/units'
 import { useSettings } from '../store/settings'
 
-type ExerciseStats = {
-  name: string
-  bestWeightKg: number
-  bestReps: number
-  totalSets: number
-  totalVolumeKg: number
-  series: { date: string; weight: number }[]
-}
-
 const RANGES = [
   { key: '30d', label: '30J', days: 30 },
   { key: '90d', label: '90J', days: 90 },
@@ -85,7 +76,6 @@ export function Evolution() {
     return { morning: deltaFor('morning'), evening: deltaFor('evening') }
   }, [weighIns, cutoff, unit])
 
-  const stats = useMemo(() => computeStats(sessions.filter(s => s.date >= cutoff)), [sessions, cutoff])
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="py-8">
@@ -216,20 +206,6 @@ export function Evolution() {
           </section>
 
           <RunningSection sessions={sessions} cutoff={cutoff} />
-
-          <section>
-            <div className="flex items-baseline justify-between mb-4">
-              <Label>Records par exercice</Label>
-              <span className="text-xs text-[color:var(--color-text-dim)]">{stats.length} exercices</span>
-            </div>
-            {stats.length === 0 ? (
-              <EmptyState title="Pas encore d'exercices" subtitle="Ajoute des séries pour voir tes PR et courbes de progression." />
-            ) : (
-              <div className="space-y-3">
-                {stats.map(s => <ExerciseCard key={s.name} stats={s} unit={unit} />)}
-              </div>
-            )}
-          </section>
         </div>
       )}
     </motion.div>
@@ -251,63 +227,6 @@ function DeltaBadge({ label, value, unit, dotColor }: { label: string; value: nu
   )
 }
 
-function ExerciseCard({ stats, unit }: { stats: ExerciseStats; unit: 'kg' | 'lb' }) {
-  return (
-    <Card className="p-5">
-      <div className="flex items-baseline justify-between mb-3">
-        <h3 className="font-display text-2xl leading-tight">{stats.name}</h3>
-        <span className="text-xs text-[color:var(--color-text-dim)]">{stats.totalSets} séries</span>
-      </div>
-      <div className="grid grid-cols-3 gap-3 mb-3">
-        <div>
-          <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium">Record</p>
-          <p className="font-display text-2xl tabular">
-            {round(fromKg(stats.bestWeightKg, unit), 1)}<span className="text-xs text-[color:var(--color-text-dim)] ml-1">{unit}</span>
-          </p>
-        </div>
-        <div>
-          <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium">Meilleur reps</p>
-          <p className="font-display text-2xl tabular">
-            {stats.bestReps}
-          </p>
-        </div>
-        <div>
-          <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium">Volume total</p>
-          <p className="font-display text-2xl tabular">
-            {formatBigNum(fromKg(stats.totalVolumeKg, unit))}<span className="text-xs text-[color:var(--color-text-dim)] ml-1">{unit}</span>
-          </p>
-        </div>
-      </div>
-      {stats.series.length >= 2 && (
-        <div className="h-20 -mx-1">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={stats.series.map(p => ({ date: p.date, value: round(fromKg(p.weight, unit), 1) }))}>
-              <defs>
-                <linearGradient id={`g-${stats.name}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="var(--color-accent)" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="var(--color-accent)" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <Tooltip
-                contentStyle={{
-                  background: 'var(--color-surface)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 10,
-                  fontSize: 11,
-                  fontFamily: 'var(--font-mono)',
-                }}
-                labelFormatter={d => format(parseISO(d as string), 'd MMM', { locale: fr })}
-                formatter={v => [`${v} ${unit}`, 'Max']}
-              />
-              <Area type="monotone" dataKey="value" stroke="var(--color-accent)" strokeWidth={2} fill={`url(#g-${stats.name})`} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-    </Card>
-  )
-}
-
 function RunningSection({ sessions, cutoff }: { sessions: Session[]; cutoff: string }) {
   const runs = useMemo(() => {
     return sessions
@@ -317,17 +236,23 @@ function RunningSection({ sessions, cutoff }: { sessions: Session[]; cutoff: str
   }, [sessions, cutoff])
 
   const stats = useMemo(() => {
-    let totalMeters = 0
-    let totalSeconds = 0
+    let bestPaceSec: number | null = null
+    let longestKm = 0
+    let longestSec = 0
     for (const r of runs) {
-      totalMeters += r.distanceMeters ?? 0
-      totalSeconds += r.durationSeconds ?? 0
+      const km = (r.distanceMeters ?? 0) / 1000
+      const sec = r.durationSeconds ?? 0
+      if (km > longestKm) longestKm = km
+      if (sec > longestSec) longestSec = sec
+      if (km > 0 && sec > 0) {
+        const pace = sec / km
+        if (bestPaceSec === null || pace < bestPaceSec) bestPaceSec = pace
+      }
     }
-    const avgPaceSecPerKm = totalMeters > 0 ? totalSeconds / (totalMeters / 1000) : 0
-    const paceStr = avgPaceSecPerKm
-      ? `${Math.floor(avgPaceSecPerKm / 60)}:${String(Math.round(avgPaceSecPerKm % 60)).padStart(2, '0')}`
+    const bestPaceStr = bestPaceSec !== null
+      ? `${Math.floor(bestPaceSec / 60)}:${String(Math.round(bestPaceSec % 60)).padStart(2, '0')}`
       : '—'
-    return { totalKm: totalMeters / 1000, totalSeconds, totalRuns: runs.length, paceStr }
+    return { bestPaceStr, longestKm, longestSec, totalRuns: runs.length }
   }, [runs])
 
   const chartData = useMemo(() => {
@@ -372,9 +297,9 @@ function RunningSection({ sessions, cutoff }: { sessions: Session[]; cutoff: str
       </div>
 
       <div className="grid grid-cols-3 gap-2 mb-3">
-        <RunStat label="Distance" value={`${Math.round(stats.totalKm * 10) / 10}`} suffix="km" />
-        <RunStat label="Temps total" value={formatHMS(stats.totalSeconds)} />
-        <RunStat label="Allure moy." value={stats.paceStr} suffix="/km" />
+        <RunStat label="Record allure" value={stats.bestPaceStr} suffix="/km" />
+        <RunStat label="Plus long" value={formatHMS(stats.longestSec)} />
+        <RunStat label="Plus loin" value={`${Math.round(stats.longestKm * 10) / 10}`} suffix="km" />
       </div>
 
       {chartData.length >= 2 && (
@@ -464,35 +389,3 @@ function formatHMS(totalSec: number): string {
   return `${m} min`
 }
 
-function computeStats(sessions: Session[]): ExerciseStats[] {
-  const byName = new Map<string, { reps: number; weightKg: number; date: string }[]>()
-  for (const s of sessions) {
-    for (const ex of s.exercises) {
-      const key = ex.name.trim()
-      if (!key) continue
-      const arr = byName.get(key) ?? []
-      for (const set of ex.sets) arr.push({ reps: set.reps, weightKg: Number(set.weight), date: s.date })
-      byName.set(key, arr)
-    }
-  }
-  const out: ExerciseStats[] = []
-  for (const [name, sets] of byName) {
-    if (sets.length === 0) continue
-    const bestWeightKg = Math.max(...sets.map(s => s.weightKg))
-    const bestReps = Math.max(...sets.map(s => s.reps))
-    const totalVolumeKg = sets.reduce((n, s) => n + s.reps * s.weightKg, 0)
-    const byDate = new Map<string, number>()
-    for (const s of sets) byDate.set(s.date, Math.max(byDate.get(s.date) ?? 0, s.weightKg))
-    const series = [...byDate.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, weight]) => ({ date, weight }))
-    out.push({ name, bestWeightKg, bestReps, totalSets: sets.length, totalVolumeKg, series })
-  }
-  out.sort((a, b) => b.totalSets - a.totalSets)
-  return out
-}
-
-function formatBigNum(v: number): string {
-  if (v >= 1000) return `${round(v / 1000, 1)}k`
-  return String(Math.round(v))
-}
