@@ -51,7 +51,7 @@ export function Login() {
       <GridPattern />
       <BackgroundGlow />
 
-      <div className="flex-1 min-h-0 flex flex-col max-w-md mx-auto w-full px-5 relative z-10 safe-top safe-bottom py-4">
+      <div className="flex-1 min-h-0 flex flex-col justify-center max-w-md mx-auto w-full px-5 relative z-10 safe-top safe-bottom py-4 gap-5">
         {/* Logo */}
         <motion.div
           initial={{ opacity: 0, y: 12 }}
@@ -73,7 +73,6 @@ export function Login() {
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}
-          className="mt-6 sm:mt-8"
         >
           <p className="text-[10px] uppercase tracking-[0.22em] text-[color:var(--color-text-dim)] font-semibold mb-3 flex items-center gap-2">
             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[color:var(--color-accent-soft)] text-[color:var(--color-accent)]">
@@ -99,7 +98,7 @@ export function Login() {
           initial="hidden"
           animate="show"
           variants={{ show: { transition: { staggerChildren: 0.07, delayChildren: 0.2 } } }}
-          className="grid grid-cols-3 gap-2 mt-5"
+          className="grid grid-cols-3 gap-2"
         >
           <FeatureCard icon={<CalendarDays size={13} />} label="Planning">
             <div className="flex gap-0.5">
@@ -121,9 +120,6 @@ export function Login() {
             <p className="font-mono text-sm tabular font-semibold leading-none">01:30</p>
           </FeatureCard>
         </motion.div>
-
-        {/* Spacer to push auth to bottom */}
-        <div className="flex-1 min-h-[16px]" />
 
         {!isConfigured && (
           <div className="rounded-2xl p-3 mb-3 bg-[color:var(--color-danger)]/10 border border-[color:var(--color-danger)]/30 text-xs shrink-0">
