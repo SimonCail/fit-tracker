@@ -244,12 +244,13 @@ function ExerciseCard({
     setWeight(String(round(fromKg(Number(lastSet.weight), unit), 1)))
   }
 
-  // Find the FIRST occurrence of the top weight (don't decorate every tie).
+  // Trophy only on the best set if there is a CLEAR winner (one set strictly heavier than all others).
   const topSetId = useMemo(() => {
-    if (!bestPreview) return null
-    const first = exercise.sets.find(s => Number(s.weight) === bestKg)
-    return first?.id ?? null
-  }, [exercise.sets, bestKg, bestPreview])
+    if (exercise.sets.length < 2) return null
+    const sorted = [...exercise.sets].sort((a, b) => Number(b.weight) - Number(a.weight))
+    if (Number(sorted[0].weight) === Number(sorted[1].weight)) return null
+    return sorted[0].id
+  }, [exercise.sets])
 
   return (
     <Card className="p-5">
