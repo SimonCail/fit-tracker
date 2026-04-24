@@ -106,12 +106,7 @@ export function SessionPage() {
       setPrToast({ name: exerciseName, weight: weightKg })
       window.setTimeout(() => setPrToast(null), 3500)
     }
-    // Only auto-open the rest timer when logging a live session today.
-    // If the session date is in the past (antedated logging), stay quiet.
-    const todayIso = format(new Date(), 'yyyy-MM-dd')
-    if (data?.date === todayIso) {
-      setTimerOpen(true)
-    }
+    // Timer never auto-opens — user triggers it manually via the header button.
   }
 
   if (loading) return <div className="flex justify-center py-20"><Spinner /></div>
