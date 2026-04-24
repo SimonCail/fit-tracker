@@ -244,14 +244,6 @@ function ExerciseCard({
     setWeight(String(round(fromKg(Number(lastSet.weight), unit), 1)))
   }
 
-  // Trophy only on the best set if there is a CLEAR winner (one set strictly heavier than all others).
-  const topSetId = useMemo(() => {
-    if (exercise.sets.length < 2) return null
-    const sorted = [...exercise.sets].sort((a, b) => Number(b.weight) - Number(a.weight))
-    if (Number(sorted[0].weight) === Number(sorted[1].weight)) return null
-    return sorted[0].id
-  }, [exercise.sets])
-
   return (
     <Card className="p-5">
       <header className="flex items-start justify-between gap-3 mb-1">
@@ -313,7 +305,6 @@ function ExerciseCard({
                 index={i + 1}
                 set={set}
                 unit={unit}
-                isTop={set.id === topSetId}
                 onChange={onChange}
               />
             ))}
@@ -382,7 +373,6 @@ function SetRow({
   index,
   set,
   unit,
-  isTop,
   onChange,
 }: {
   sessionId: string
@@ -390,7 +380,6 @@ function SetRow({
   index: number
   set: ExerciseSet
   unit: 'kg' | 'lb'
-  isTop: boolean
   onChange: () => void
 }) {
   const [editing, setEditing] = useState(false)
@@ -456,7 +445,6 @@ function SetRow({
       <span className="font-display text-lg tabular text-center leading-none">{set.reps}</span>
       <span className="font-display text-lg tabular text-center leading-none">
         {round(fromKg(Number(set.weight), unit), 1)}
-        {isTop && <Trophy size={12} className="inline-block ml-1.5 -mt-1 text-[color:var(--color-accent)]" />}
       </span>
       <div className="flex items-center justify-end">
         <button
