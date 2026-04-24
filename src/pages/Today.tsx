@@ -316,6 +316,7 @@ function WeightCard({
   lastWeighIn?: WeighIn
   onChanged: () => void
 }) {
+  const [antedateOpen, setAntedateOpen] = useState(false)
   return (
     <Card className="p-5 flex flex-col">
       <div className="flex items-center justify-between mb-4">
@@ -332,6 +333,24 @@ function WeightCard({
             )}
           </div>
         </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => setAntedateOpen(true)}
+              className="p-2 rounded-full text-[color:var(--color-text-dim)] hover:text-[color:var(--color-text)] hover:bg-[color:var(--color-surface-2)] transition-colors cursor-pointer"
+              aria-label="Antidater une pesée"
+            >
+              <CalendarPlus size={16} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="left">Antidater</TooltipContent>
+        </Tooltip>
+        <WeighInAntedateModal
+          open={antedateOpen}
+          onOpenChange={setAntedateOpen}
+          unit={unit}
+          onSaved={() => { setAntedateOpen(false); onChanged() }}
+        />
       </div>
 
       <div className="space-y-2 mt-auto">
@@ -585,6 +604,135 @@ function DatePickerModal({
         </div>
       </ModalContent>
     </Modal>
+  )
+}
+
+function WeighInAntedateModal({
+  open,
+  onOpenChange,
+  unit,
+  onSaved,
+}: {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  unit: 'kg' | 'lb'
+  onSaved: () => void
+}) {
+  const [date, setDate] = useState(todayIso())
+  const [slot, setSlot] = useState<WeighSlot>('morning')
+  const [value, setValue] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (open) {
+      setDate(todayIso())
+      setSlot('morning')
+      setValue('')
+    }
+  }, [open])
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault()
+    const n = Number(value)
+    if (!value || Number.isNaN(n) || n <= 0) return
+    const kg = toKg(n, unit)
+    if (kg < 20 || kg > 400) return
+    setSaving(true)
+    try {
+      await setWeighIn(date, slot, kg)
+      onSaved()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal open={open} onOpenChange={onOpenChange}>
+      <ModalContent>
+        <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text-dim)] font-medium">Pesée</p>
+        <h3 className="font-display text-2xl mt-1 font-semibold">Ajouter pour une autre date</h3>
+
+        <form onSubmit={save} className="mt-5 space-y-4">
+          <div>
+            <Label className="block mb-2">Date</Label>
+            <div className="flex gap-2 mb-2">
+              <QuickDate label="Aujourd'hui" value={todayIso()} current={date} onChange={setDate} />
+              <QuickDate label="Hier" value={yesterdayIso()} current={date} onChange={setDate} />
+            </div>
+            <Input
+              type="date"
+              value={date}
+              onChange={e => setDate(e.target.value)}
+              max={todayIso()}
+              className="h-11 w-full min-w-0"
+            />
+          </div>
+
+          <div>
+            <Label className="block mb-2">Moment</Label>
+            <div className="flex gap-2">
+              <SlotChoice
+                icon={<Sunrise size={14} />}
+                label="Matin"
+                selected={slot === 'morning'}
+                onClick={() => setSlot('morning')}
+              />
+              <SlotChoice
+                icon={<Moon size={14} />}
+                label="Soir"
+                selected={slot === 'evening'}
+                onClick={() => setSlot('evening')}
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label className="block mb-2">Poids</Label>
+            <div className="relative">
+              <Input
+                type="number"
+                step="0.1"
+                min="20"
+                max="400"
+                value={value}
+                onChange={e => setValue(e.target.value)}
+                placeholder="0.0"
+                inputMode="decimal"
+                className="h-11 pr-12 text-lg font-semibold tabular"
+                autoFocus
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium pointer-events-none">
+                {unit}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>Annuler</Button>
+            <Button type="submit" variant="accent" disabled={saving || !value}>
+              {saving ? '…' : 'Enregistrer'}
+            </Button>
+          </div>
+        </form>
+      </ModalContent>
+    </Modal>
+  )
+}
+
+function SlotChoice({ icon, label, selected, onClick }: { icon: React.ReactNode; label: string; selected: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex-1 h-11 flex items-center justify-center gap-2 rounded-xl text-sm font-medium transition-all cursor-pointer active:scale-[0.97] ${
+        selected
+          ? 'bg-[color:var(--color-accent-soft)] text-[color:var(--color-accent)] border-2 border-[color:var(--color-accent)]'
+          : 'bg-[color:var(--color-surface-2)] text-[color:var(--color-text-dim)] border-2 border-[color:var(--color-border)] hover:text-[color:var(--color-text)] hover:border-[color:var(--color-border-strong)]'
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
   )
 }
 
