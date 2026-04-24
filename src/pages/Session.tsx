@@ -18,7 +18,7 @@ import {
   updateSet,
 } from '../lib/db'
 import type { Exercise, ExerciseSet, Session } from '../lib/types'
-import { estimate1RM, formatWeight, fromKg, round, toKg } from '../lib/units'
+import { formatWeight, fromKg, round, toKg } from '../lib/units'
 import { useSettings } from '../store/settings'
 import { RestTimer } from '../components/RestTimer'
 
@@ -217,9 +217,18 @@ function ExerciseCard({
   const lastSet = exercise.sets[exercise.sets.length - 1]
   const bestKg = exercise.sets.reduce((m, s) => Math.max(m, Number(s.weight)), 0)
   const bestPreview = useMemo(() => {
-    const best = exercise.sets.reduce<ExerciseSet | null>((m, s) => (!m || Number(s.weight) > Number(m.weight) ? s : m), null)
+    // Best = heaviest weight; ties broken by higher reps.
+    const best = exercise.sets.reduce<ExerciseSet | null>((m, s) => {
+      if (!m) return s
+      const sw = Number(s.weight)
+      const mw = Number(m.weight)
+      if (sw > mw) return s
+      if (sw === mw && s.reps > m.reps) return s
+      return m
+    }, null)
     if (!best) return null
-    return { set: best, oneRm: estimate1RM(Number(best.weight), best.reps) }
+    const volumeKg = exercise.sets.reduce((sum, s) => sum + Number(s.reps) * Number(s.weight), 0)
+    return { set: best, volumeKg }
   }, [exercise.sets])
 
   async function onAddSet(e: React.FormEvent) {
@@ -283,7 +292,7 @@ function ExerciseCard({
       {bestPreview && (
         <div className="grid grid-cols-3 gap-2 mt-3 mb-4 text-xs">
           <MiniStat label="Top" value={`${bestPreview.set.reps}×${round(fromKg(Number(bestPreview.set.weight), unit), 1)}`} />
-          <MiniStat label="1RM estimé" value={`${Math.round(fromKg(bestPreview.oneRm, unit))}`} suffix={unit} />
+          <MiniStat label="Volume" value={formatVolume(bestPreview.volumeKg, unit)} suffix={unit} />
           <MiniStat label="Séries" value={String(exercise.sets.length)} />
         </div>
       )}
@@ -353,6 +362,12 @@ function ExerciseCard({
       )}
     </Card>
   )
+}
+
+function formatVolume(kg: number, unit: 'kg' | 'lb'): string {
+  const v = fromKg(kg, unit)
+  if (v >= 1000) return `${round(v / 1000, 1)}k`
+  return String(Math.round(v))
 }
 
 function MiniStat({ label, value, suffix }: { label: string; value: string; suffix?: string }) {
