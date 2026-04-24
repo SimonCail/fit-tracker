@@ -3,7 +3,7 @@ import { format, parseISO, subDays } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { motion } from 'framer-motion'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { TrendingDown, TrendingUp } from 'lucide-react'
+import { Footprints, TrendingDown, TrendingUp } from 'lucide-react'
 import { Card, EmptyState, Label, Skeleton } from '../components/ui'
 import { listSessions, listWeighIns } from '../lib/db'
 import type { Session, WeighIn } from '../lib/types'
@@ -215,6 +215,8 @@ export function Evolution() {
             )}
           </section>
 
+          <RunningSection sessions={sessions} cutoff={cutoff} />
+
           <section>
             <div className="flex items-baseline justify-between mb-4">
               <Label>Records par exercice</Label>
@@ -304,6 +306,162 @@ function ExerciseCard({ stats, unit }: { stats: ExerciseStats; unit: 'kg' | 'lb'
       )}
     </Card>
   )
+}
+
+function RunningSection({ sessions, cutoff }: { sessions: Session[]; cutoff: string }) {
+  const runs = useMemo(() => {
+    return sessions
+      .filter(s => s.type === 'running' && s.date >= cutoff)
+      .filter(s => (s.distanceMeters ?? 0) > 0 || (s.durationSeconds ?? 0) > 0)
+      .sort((a, b) => a.date.localeCompare(b.date))
+  }, [sessions, cutoff])
+
+  const stats = useMemo(() => {
+    let totalMeters = 0
+    let totalSeconds = 0
+    for (const r of runs) {
+      totalMeters += r.distanceMeters ?? 0
+      totalSeconds += r.durationSeconds ?? 0
+    }
+    const avgPaceSecPerKm = totalMeters > 0 ? totalSeconds / (totalMeters / 1000) : 0
+    const paceStr = avgPaceSecPerKm
+      ? `${Math.floor(avgPaceSecPerKm / 60)}:${String(Math.round(avgPaceSecPerKm % 60)).padStart(2, '0')}`
+      : '—'
+    return { totalKm: totalMeters / 1000, totalSeconds, totalRuns: runs.length, paceStr }
+  }, [runs])
+
+  const chartData = useMemo(() => {
+    return runs
+      .filter(r => (r.distanceMeters ?? 0) > 0 && (r.durationSeconds ?? 0) > 0)
+      .map(r => {
+        const km = (r.distanceMeters ?? 0) / 1000
+        const paceSec = (r.durationSeconds ?? 0) / km
+        return {
+          date: r.date,
+          pace: Math.round((paceSec / 60) * 100) / 100, // minutes/km decimal (for chart)
+          km: Math.round(km * 100) / 100,
+        }
+      })
+  }, [runs])
+
+  const byRoute = useMemo(() => {
+    const map = new Map<string, { name: string; runs: number; totalKm: number; bestPaceSec: number | null }>()
+    for (const r of runs) {
+      const name = r.route?.trim()
+      if (!name) continue
+      const entry = map.get(name) ?? { name, runs: 0, totalKm: 0, bestPaceSec: null }
+      entry.runs += 1
+      entry.totalKm += (r.distanceMeters ?? 0) / 1000
+      const km = (r.distanceMeters ?? 0) / 1000
+      if (km > 0 && (r.durationSeconds ?? 0) > 0) {
+        const paceSec = (r.durationSeconds ?? 0) / km
+        if (entry.bestPaceSec === null || paceSec < entry.bestPaceSec) entry.bestPaceSec = paceSec
+      }
+      map.set(name, entry)
+    }
+    return [...map.values()].sort((a, b) => b.runs - a.runs)
+  }, [runs])
+
+  if (runs.length === 0) return null
+
+  return (
+    <section>
+      <div className="flex items-baseline justify-between mb-4">
+        <Label className="flex items-center gap-1.5"><Footprints size={12} /> Course</Label>
+        <span className="text-xs text-[color:var(--color-text-dim)]">{stats.totalRuns} sortie{stats.totalRuns > 1 ? 's' : ''}</span>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 mb-3">
+        <RunStat label="Distance" value={`${Math.round(stats.totalKm * 10) / 10}`} suffix="km" />
+        <RunStat label="Temps total" value={formatHMS(stats.totalSeconds)} />
+        <RunStat label="Allure moy." value={stats.paceStr} suffix="/km" />
+      </div>
+
+      {chartData.length >= 2 && (
+        <Card className="p-4 mb-3">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium mb-2">
+            Allure · min/km (plus bas = mieux)
+          </p>
+          <div className="h-40 -mx-1">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData}>
+                <defs>
+                  <linearGradient id="pace-grad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#a78bfa" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="#a78bfa" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="var(--color-border)" vertical={false} strokeDasharray="3 3" />
+                <XAxis dataKey="date" tickFormatter={d => format(parseISO(d), 'd MMM', { locale: fr })} stroke="var(--color-text-dim)" fontSize={11} tickMargin={8} />
+                <YAxis stroke="var(--color-text-dim)" fontSize={11} width={32} domain={['dataMin - 0.3', 'dataMax + 0.3']} reversed />
+                <Tooltip
+                  contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 12, fontSize: 12, fontFamily: 'var(--font-mono)' }}
+                  labelFormatter={d => format(parseISO(d as string), 'd MMM yyyy', { locale: fr })}
+                  formatter={(v, _n, item) => {
+                    const n = Number(v)
+                    const mm = Math.floor(n)
+                    const ss = Math.round((n - mm) * 60)
+                    const km = (item.payload as { km?: number })?.km
+                    return [`${mm}:${String(ss).padStart(2, '0')} min/km${km ? ` · ${km}km` : ''}`, 'Allure']
+                  }}
+                />
+                <Area type="monotone" dataKey="pace" stroke="#a78bfa" strokeWidth={2.5} fill="url(#pace-grad)" dot={{ r: 3, fill: '#a78bfa' }} activeDot={{ r: 5 }} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+      )}
+
+      {byRoute.length > 0 && (
+        <Card className="p-4">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium mb-3">
+            Parcours
+          </p>
+          <div className="space-y-2">
+            {byRoute.map(r => (
+              <div key={r.name} className="flex items-center justify-between py-1.5 border-b border-[color:var(--color-border)] last:border-b-0">
+                <div className="min-w-0">
+                  <p className="font-medium text-sm truncate">{r.name}</p>
+                  <p className="text-[11px] text-[color:var(--color-text-dim)]">
+                    {r.runs} sortie{r.runs > 1 ? 's' : ''} · {Math.round(r.totalKm * 10) / 10} km cumulés
+                  </p>
+                </div>
+                {r.bestPaceSec !== null && (
+                  <div className="text-right shrink-0">
+                    <p className="text-[9px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium">Record allure</p>
+                    <p className="font-mono tabular text-sm font-semibold">
+                      {Math.floor(r.bestPaceSec / 60)}:{String(Math.round(r.bestPaceSec % 60)).padStart(2, '0')}
+                      <span className="text-[10px] text-[color:var(--color-text-dim)] ml-0.5">/km</span>
+                    </p>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </section>
+  )
+}
+
+function RunStat({ label, value, suffix }: { label: string; value: string; suffix?: string }) {
+  return (
+    <Card className="p-3">
+      <p className="text-[9px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium">{label}</p>
+      <p className="font-display tabular text-lg leading-tight mt-0.5">
+        {value}
+        {suffix && <span className="text-[color:var(--color-text-dim)] text-[10px] ml-0.5">{suffix}</span>}
+      </p>
+    </Card>
+  )
+}
+
+function formatHMS(totalSec: number): string {
+  if (totalSec <= 0) return '—'
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  if (h > 0) return `${h}h${String(m).padStart(2, '0')}`
+  return `${m} min`
 }
 
 function computeStats(sessions: Session[]): ExerciseStats[] {
