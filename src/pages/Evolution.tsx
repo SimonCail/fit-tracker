@@ -73,13 +73,19 @@ export function Evolution() {
   }, [weightSeries])
 
   const weightDelta = useMemo(() => {
-    if (weightSeries.length < 2 || lastWeight === null) return null
-    const first = weightSeries.find(r => r.morning !== null || r.evening !== null)
-    if (!first) return null
-    const firstV = first.morning ?? first.evening
-    if (firstV === null) return null
-    return round(lastWeight - firstV, 1)
-  }, [weightSeries, lastWeight])
+    // Chronologically: first recorded measurement vs last recorded measurement.
+    const slotOrder = (s: 'morning' | 'evening' | null) => (s === 'evening' ? 1 : 0)
+    const sorted = [...weighIns]
+      .filter(w => w.date >= cutoff)
+      .sort((a, b) => {
+        if (a.date !== b.date) return a.date.localeCompare(b.date)
+        return slotOrder(a.slot) - slotOrder(b.slot)
+      })
+    if (sorted.length < 2) return null
+    const firstV = round(fromKg(sorted[0].weight, unit), 1)
+    const lastV = round(fromKg(sorted[sorted.length - 1].weight, unit), 1)
+    return round(lastV - firstV, 1)
+  }, [weighIns, cutoff, unit])
 
   const stats = useMemo(() => computeStats(sessions.filter(s => s.date >= cutoff)), [sessions, cutoff])
 
