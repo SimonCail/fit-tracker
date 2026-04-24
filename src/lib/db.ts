@@ -15,7 +15,7 @@ import {
   where,
 } from 'firebase/firestore'
 import { auth, db } from './firebase'
-import type { Exercise, ExerciseSet, Session, WeighIn, WeighSlot } from './types'
+import type { Exercise, ExerciseSet, Session, SessionType, WeighIn, WeighSlot } from './types'
 
 function uid(): string {
   const u = auth.currentUser
@@ -40,12 +40,18 @@ function toMs(v: unknown): number {
 }
 
 function parseSession(id: string, data: Record<string, unknown>): Session {
+  const rawType = data.type as string | undefined
+  const type = rawType === 'running' ? 'running' : 'strength'
   return {
     id,
     date: (data.date as string) ?? '',
     notes: (data.notes as string | null) ?? null,
     createdAt: toMs(data.createdAt),
+    type,
     exercises: Array.isArray(data.exercises) ? (data.exercises as Exercise[]) : [],
+    distanceMeters: typeof data.distanceMeters === 'number' ? data.distanceMeters : null,
+    durationSeconds: typeof data.durationSeconds === 'number' ? data.durationSeconds : null,
+    route: (data.route as string | null) ?? null,
   }
 }
 
@@ -78,25 +84,37 @@ export async function getSession(id: string): Promise<Session | null> {
   return parseSession(snap.id, snap.data())
 }
 
-export async function createSession(date: string, notes: string | null = null): Promise<Session> {
+export async function createSession(
+  date: string,
+  notes: string | null = null,
+  type: SessionType = 'strength',
+): Promise<Session> {
   const docRef = await addDoc(sessionsCol(), {
     date,
     notes,
+    type,
     exercises: [],
     createdAt: serverTimestamp(),
   })
-  return { id: docRef.id, date, notes, exercises: [], createdAt: Date.now() }
+  return { id: docRef.id, date, notes, type, exercises: [], createdAt: Date.now() }
 }
 
 /** Find an existing session on a date, or create a new one. Ensures ≤1 session per day. */
-export async function findOrCreateSessionOnDate(date: string): Promise<Session> {
+export async function findOrCreateSessionOnDate(date: string, type: SessionType = 'strength'): Promise<Session> {
   const q = query(sessionsCol(), where('date', '==', date), limit(1))
   const snap = await getDocs(q)
   if (!snap.empty) {
     const d = snap.docs[0]
     return parseSession(d.id, d.data())
   }
-  return createSession(date)
+  return createSession(date, null, type)
+}
+
+export async function updateRunningSession(
+  id: string,
+  patch: { distanceMeters?: number | null; durationSeconds?: number | null; route?: string | null },
+) {
+  await updateDoc(sessionRef(id), patch)
 }
 
 /**
@@ -117,7 +135,7 @@ export async function duplicateSession(fromId: string, toDate: string): Promise<
   return { ...target, exercises: templateExercises }
 }
 
-export async function updateSession(id: string, patch: Partial<Pick<Session, 'date' | 'notes'>>) {
+export async function updateSession(id: string, patch: Partial<Pick<Session, 'date' | 'notes' | 'type'>>) {
   await updateDoc(sessionRef(id), patch)
 }
 

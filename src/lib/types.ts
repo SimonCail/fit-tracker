@@ -10,12 +10,19 @@ export type Exercise = {
   sets: ExerciseSet[]
 }
 
+export type SessionType = 'strength' | 'running'
+
 export type Session = {
   id: string
   date: string
   notes: string | null
   createdAt: number
+  type: SessionType
   exercises: Exercise[]
+  // Running-specific fields (ignored for strength sessions).
+  distanceMeters?: number | null
+  durationSeconds?: number | null
+  route?: string | null
 }
 
 export type WeighSlot = 'morning' | 'evening'

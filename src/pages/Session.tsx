@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Check, Plus, Timer, Trash2, Trophy } from 'lucide-react'
+import { ArrowLeft, Check, Footprints, Plus, Timer, Trash2, Trophy } from 'lucide-react'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -14,6 +14,7 @@ import {
   getDistinctExerciseNames,
   getSession,
   listSessions,
+  updateRunningSession,
   updateSession,
   updateSet,
 } from '../lib/db'
@@ -128,14 +129,16 @@ export function SessionPage() {
             {format(new Date(data.date), 'EEEE d MMMM', { locale: fr })}
           </p>
         </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" onClick={() => setTimerOpen(true)} aria-label="Timer de repos">
-              <Timer size={18} />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Timer de repos</TooltipContent>
-        </Tooltip>
+        {data.type !== 'running' && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" onClick={() => setTimerOpen(true)} aria-label="Timer de repos">
+                <Timer size={18} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Timer de repos</TooltipContent>
+          </Tooltip>
+        )}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="icon" onClick={onDeleteSession} aria-label="Supprimer la séance">
@@ -146,29 +149,41 @@ export function SessionPage() {
         </Tooltip>
       </header>
 
+      {data.type === 'running' && (
+        <div className="inline-flex items-center gap-2 mb-4 px-3 h-7 rounded-full bg-[color:var(--color-accent-soft)] text-[color:var(--color-accent)] text-[10px] uppercase tracking-widest font-semibold">
+          <Footprints size={12} /> Course
+        </div>
+      )}
+
       <input
         value={notes}
         onChange={e => onNotesChange(e.target.value)}
-        placeholder="Titre de la séance"
+        placeholder={data.type === 'running' ? 'Titre (ex: Tour du parc)' : 'Titre de la séance'}
         className="w-full bg-transparent font-display text-4xl sm:text-5xl leading-[1.05] tracking-tight placeholder:text-[color:var(--color-text-dim)]/50 focus:outline-none focus:caret-[color:var(--color-accent)] border-b-2 border-transparent hover:border-[color:var(--color-border)] focus:border-[color:var(--color-accent)]/60 transition-colors pb-1 mb-8 cursor-text"
       />
 
-      <div className="space-y-4">
-        {data.exercises.map((ex, i) => (
-          <ExerciseCard
-            key={ex.id}
-            index={i + 1}
-            sessionId={id}
-            exercise={ex}
-            unit={unit}
-            previousPR={pastPR[ex.name.trim()] ?? 0}
-            onChange={load}
-            onSetAdded={onSetAdded}
-          />
-        ))}
-      </div>
+      {data.type === 'running' ? (
+        <RunningSessionView session={data} onChange={load} />
+      ) : (
+        <>
+          <div className="space-y-4">
+            {data.exercises.map((ex, i) => (
+              <ExerciseCard
+                key={ex.id}
+                index={i + 1}
+                sessionId={id}
+                exercise={ex}
+                unit={unit}
+                previousPR={pastPR[ex.name.trim()] ?? 0}
+                onChange={load}
+                onSetAdded={onSetAdded}
+              />
+            ))}
+          </div>
 
-      <AddExercise suggestions={exerciseNames} onAdd={onAddExercise} />
+          <AddExercise suggestions={exerciseNames} onAdd={onAddExercise} />
+        </>
+      )}
 
       <RestTimer open={timerOpen} onClose={() => setTimerOpen(false)} defaultSeconds={restSeconds} />
 
@@ -518,6 +533,103 @@ function AddExercise({ suggestions, onAdd }: { suggestions: string[]; onAdd: (na
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+
+function RunningSessionView({ session, onChange }: { session: Session; onChange: () => void }) {
+  const [distanceKm, setDistanceKm] = useState(session.distanceMeters ? String(Math.round((session.distanceMeters / 1000) * 100) / 100) : '')
+  const [durationMin, setDurationMin] = useState(session.durationSeconds ? String(Math.floor(session.durationSeconds / 60)) : '')
+  const [durationSec, setDurationSec] = useState(session.durationSeconds ? String(session.durationSeconds % 60).padStart(2, '0') : '')
+  const [route, setRoute] = useState(session.route ?? '')
+  const [saving, setSaving] = useState(false)
+  const saveTimer = useRef<number | null>(null)
+
+  const distanceMeters = Number(distanceKm) > 0 ? Math.round(Number(distanceKm) * 1000) : null
+  const durationSeconds = (() => {
+    const m = Number(durationMin) || 0
+    const s = Number(durationSec) || 0
+    const total = m * 60 + s
+    return total > 0 ? total : null
+  })()
+
+  function schedulePersist() {
+    if (saveTimer.current) window.clearTimeout(saveTimer.current)
+    saveTimer.current = window.setTimeout(async () => {
+      setSaving(true)
+      try {
+        await updateRunningSession(session.id, {
+          distanceMeters,
+          durationSeconds,
+          route: route.trim() || null,
+        })
+        onChange()
+      } finally {
+        setSaving(false)
+      }
+    }, 500)
+  }
+
+  useEffect(() => { schedulePersist() /* eslint-disable-next-line */ }, [distanceKm, durationMin, durationSec, route])
+
+  const pace = distanceMeters && durationSeconds
+    ? (() => {
+        const secPerKm = durationSeconds / (distanceMeters / 1000)
+        const mm = Math.floor(secPerKm / 60)
+        const ss = Math.round(secPerKm % 60)
+        return `${mm}:${String(ss).padStart(2, '0')}`
+      })()
+    : '—'
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-5">
+        <div className="grid grid-cols-3 gap-2 mb-5">
+          <MiniStatRun label="Distance" value={distanceKm || '—'} suffix="km" />
+          <MiniStatRun label="Durée" value={durationMin ? `${durationMin}:${(durationSec || '00').padStart(2, '0')}` : '—'} />
+          <MiniStatRun label="Allure" value={pace} suffix="/km" />
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <Label className="block mb-1.5">Distance (km)</Label>
+            <Input type="number" step="0.01" min="0" value={distanceKm} onChange={e => setDistanceKm(e.target.value)} placeholder="5.00" inputMode="decimal" />
+          </div>
+          <div>
+            <Label className="block mb-1.5">Durée</Label>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Input type="number" min="0" max="600" value={durationMin} onChange={e => setDurationMin(e.target.value)} placeholder="25" inputMode="numeric" className="pr-10" />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium pointer-events-none">min</span>
+              </div>
+              <span className="text-[color:var(--color-text-dim)]">:</span>
+              <div className="relative flex-1">
+                <Input type="number" min="0" max="59" value={durationSec} onChange={e => setDurationSec(e.target.value)} placeholder="30" inputMode="numeric" className="pr-10" />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium pointer-events-none">sec</span>
+              </div>
+            </div>
+          </div>
+          <div>
+            <Label className="block mb-1.5">Parcours (optionnel)</Label>
+            <Input value={route} onChange={e => setRoute(e.target.value)} placeholder="Tour du parc, Bord de Seine…" />
+            <p className="text-[10px] text-[color:var(--color-text-dim)] mt-1.5">Donne un nom à ton parcours pour suivre ton progrès sur le même trajet.</p>
+          </div>
+          {saving && <p className="text-[10px] text-[color:var(--color-text-dim)]">Enregistrement…</p>}
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+function MiniStatRun({ label, value, suffix }: { label: string; value: string; suffix?: string }) {
+  return (
+    <div className="rounded-xl bg-[color:var(--color-surface-2)]/60 border border-[color:var(--color-border)] px-3 py-2">
+      <p className="text-[9px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium">{label}</p>
+      <p className="font-display tabular text-lg leading-tight mt-0.5">
+        {value}
+        {suffix && <span className="text-[color:var(--color-text-dim)] text-[10px] ml-0.5">{suffix}</span>}
+      </p>
     </div>
   )
 }

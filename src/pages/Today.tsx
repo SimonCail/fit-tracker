@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowRight, Flame, Plus, Scale, Trophy, ChevronRight, CalendarPlus, Sunrise, Moon, Pencil, Check, X } from 'lucide-react'
+import { ArrowRight, Dumbbell, Flame, Footprints, Plus, Scale, Trophy, ChevronRight, CalendarPlus, Sunrise, Moon, Pencil, Check, X } from 'lucide-react'
 import { differenceInCalendarDays, format, parseISO } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { motion } from 'framer-motion'
@@ -26,7 +26,7 @@ import {
   listWeighIns,
   setWeighIn,
 } from '../lib/db'
-import type { Session, WeighIn, WeighSlot } from '../lib/types'
+import type { Session, SessionType, WeighIn, WeighSlot } from '../lib/types'
 import { formatWeight, fromKg, round, toKg } from '../lib/units'
 import { dateToDayKey, useSettings } from '../store/settings'
 import { maybeFireReminder } from '../lib/notifications'
@@ -93,8 +93,8 @@ export function Today() {
   }, [sessions])
   const weighInDates = useMemo(() => weighIns.map(w => w.date), [weighIns])
 
-  async function goToSession(date: string) {
-    const s = await findOrCreateSessionOnDate(date)
+  async function goToSession(date: string, type: SessionType = 'strength') {
+    const s = await findOrCreateSessionOnDate(date, type)
     nav(`/session/${s.id}`)
   }
 
@@ -197,13 +197,13 @@ export function Today() {
         open={datePickerOpen}
         onOpenChange={setDatePickerOpen}
         sessions={sessions}
-        onPick={async (date, sourceId) => {
+        onPick={async (date, sourceId, type) => {
           setDatePickerOpen(false)
           if (sourceId) {
             const s = await duplicateSession(sourceId, date)
             nav(`/session/${s.id}`)
           } else {
-            await goToSession(date)
+            await goToSession(date, type)
           }
         }}
       />
@@ -566,10 +566,11 @@ function DatePickerModal({
   open: boolean
   onOpenChange: (o: boolean) => void
   sessions: Session[]
-  onPick: (date: string, sourceId: string | null) => void
+  onPick: (date: string, sourceId: string | null, type: SessionType) => void
 }) {
   const [date, setDate] = useState(todayIso())
   const [sourceId, setSourceId] = useState<string | null>(null)
+  const [type, setType] = useState<SessionType>('strength')
   const sessionsByDate = useMemo(() => new Set(sessions.map(s => s.date)), [sessions])
   const existing = sessionsByDate.has(date)
 
@@ -577,6 +578,7 @@ function DatePickerModal({
     if (open) {
       setDate(todayIso())
       setSourceId(null)
+      setType('strength')
     }
   }, [open])
 
@@ -591,7 +593,25 @@ function DatePickerModal({
     <Modal open={open} onOpenChange={onOpenChange}>
       <ModalContent>
         <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text-dim)] font-medium">Nouvelle séance</p>
-        <h3 className="font-display text-2xl mt-1 font-semibold">Date et template</h3>
+        <h3 className="font-display text-2xl mt-1 font-semibold">Type, date et template</h3>
+
+        <div className="mt-5">
+          <Label className="block mb-2">Type</Label>
+          <div className="grid grid-cols-2 gap-2">
+            <TypeChoice
+              icon={<Dumbbell size={14} />}
+              label="Musculation"
+              selected={type === 'strength'}
+              onClick={() => setType('strength')}
+            />
+            <TypeChoice
+              icon={<Footprints size={14} />}
+              label="Course"
+              selected={type === 'running'}
+              onClick={() => { setType('running'); setSourceId(null) }}
+            />
+          </div>
+        </div>
 
         <div className="mt-5">
           <Label className="block mb-2">Date</Label>
@@ -618,35 +638,64 @@ function DatePickerModal({
           )}
         </div>
 
-        <div className="mt-5">
-          <Label className="block mb-2">Partir de</Label>
-          <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
-            <TemplateChoice
-              selected={sourceId === null}
-              title="Séance vide"
-              subtitle="Tu ajoutes les exos à la main"
-              onClick={() => setSourceId(null)}
-            />
-            {templates.map(s => (
+        {type === 'strength' && (
+          <div className="mt-5">
+            <Label className="block mb-2">Partir de</Label>
+            <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
               <TemplateChoice
-                key={s.id}
-                selected={sourceId === s.id}
-                title={s.notes || 'Séance'}
-                subtitle={`${format(parseISO(s.date), 'd MMM', { locale: fr })} · ${s.exercises.length} exos (${s.exercises.map(e => e.name).slice(0, 2).join(', ')}${s.exercises.length > 2 ? '…' : ''})`}
-                onClick={() => setSourceId(s.id)}
+                selected={sourceId === null}
+                title="Séance vide"
+                subtitle="Tu ajoutes les exos à la main"
+                onClick={() => setSourceId(null)}
               />
-            ))}
+              {templates.map(s => (
+                <TemplateChoice
+                  key={s.id}
+                  selected={sourceId === s.id}
+                  title={s.notes || 'Séance'}
+                  subtitle={`${format(parseISO(s.date), 'd MMM', { locale: fr })} · ${s.exercises.length} exos (${s.exercises.map(e => e.name).slice(0, 2).join(', ')}${s.exercises.length > 2 ? '…' : ''})`}
+                  onClick={() => setSourceId(s.id)}
+                />
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="mt-6 flex justify-end gap-2">
           <Button variant="secondary" onClick={() => onOpenChange(false)}>Annuler</Button>
-          <Button variant="accent" onClick={() => onPick(date, sourceId)}>
+          <Button variant="accent" onClick={() => onPick(date, sourceId, type)}>
             {actionLabel}
           </Button>
         </div>
       </ModalContent>
     </Modal>
+  )
+}
+
+function TypeChoice({
+  icon,
+  label,
+  selected,
+  onClick,
+}: {
+  icon: React.ReactNode
+  label: string
+  selected: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`h-12 flex items-center justify-center gap-2 rounded-xl text-sm font-medium transition-all cursor-pointer active:scale-[0.97] border-2 ${
+        selected
+          ? 'border-[color:var(--color-accent)] bg-[color:var(--color-accent-soft)] text-[color:var(--color-accent)]'
+          : 'border-[color:var(--color-border)] text-[color:var(--color-text-dim)] hover:text-[color:var(--color-text)] hover:border-[color:var(--color-border-strong)]'
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
   )
 }
 
