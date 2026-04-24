@@ -16,8 +16,6 @@ export function Layout() {
     { to: '/evolution', label: 'Évolution' },
   ]
 
-  const onSessionRoute = loc.pathname.startsWith('/session/')
-
   return (
     <div className="min-h-[100dvh] flex flex-col">
       {/* Top bar: desktop only (sm+). On mobile we use a bottom tab bar exclusively. */}
@@ -31,37 +29,34 @@ export function Layout() {
                 </div>
                 <span className="font-display text-lg tracking-tight">Fit</span>
               </Link>
-              {!onSessionRoute && (
-                <nav className="flex-1 flex justify-center">
-                  <div className="relative inline-flex items-center p-1">
-                    {tabs.map(t => {
-                      const active = t.end ? loc.pathname === t.to : loc.pathname.startsWith(t.to)
-                      return (
-                        <Link
-                          key={t.to}
-                          to={t.to}
-                          className={cn(
-                            'relative px-3.5 h-8 flex items-center rounded-full text-xs font-medium transition-colors whitespace-nowrap',
-                            active
-                              ? 'text-[color:var(--color-text)]'
-                              : 'text-[color:var(--color-text-dim)] hover:text-[color:var(--color-text)]',
-                          )}
-                        >
-                          {active && (
-                            <motion.div
-                              layoutId="active-tab"
-                              className="absolute inset-0 bg-[color:var(--color-surface-2)] rounded-full shadow-[inset_0_1px_0_color-mix(in_srgb,var(--color-text)_12%,transparent)]"
-                              transition={{ type: 'spring', stiffness: 400, damping: 32 }}
-                            />
-                          )}
-                          <span className="relative z-10">{t.label}</span>
-                        </Link>
-                      )
-                    })}
-                  </div>
-                </nav>
-              )}
-              {onSessionRoute && <div className="flex-1" />}
+              <nav className="flex-1 flex justify-center">
+                <div className="relative inline-flex items-center p-1">
+                  {tabs.map(t => {
+                    const active = t.end ? loc.pathname === t.to : loc.pathname.startsWith(t.to)
+                    return (
+                      <Link
+                        key={t.to}
+                        to={t.to}
+                        className={cn(
+                          'relative px-3.5 h-8 flex items-center rounded-full text-xs font-medium transition-colors whitespace-nowrap',
+                          active
+                            ? 'text-[color:var(--color-text)]'
+                            : 'text-[color:var(--color-text-dim)] hover:text-[color:var(--color-text)]',
+                        )}
+                      >
+                        {active && (
+                          <motion.div
+                            layoutId="active-tab"
+                            className="absolute inset-0 bg-[color:var(--color-surface-2)] rounded-full shadow-[inset_0_1px_0_color-mix(in_srgb,var(--color-text)_12%,transparent)]"
+                            transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+                          />
+                        )}
+                        <span className="relative z-10">{t.label}</span>
+                      </Link>
+                    )
+                  })}
+                </div>
+              </nav>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)} aria-label="Réglages" className="shrink-0">
@@ -86,7 +81,6 @@ export function Layout() {
 }
 
 function MobileTabBar({ loc, onSettingsClick }: { loc: string; onSettingsClick: () => void }) {
-  if (loc.startsWith('/session/')) return null
   const tabs = [
     { to: '/', icon: Clock, end: true, label: "Aujourd'hui" },
     { to: '/history', icon: Dumbbell, label: 'Historique' },
