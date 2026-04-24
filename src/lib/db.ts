@@ -254,3 +254,103 @@ export async function getDistinctExerciseNames(): Promise<string[]> {
   }
   return out
 }
+
+/**
+ * Rename all exercises whose normalized name matches `fromNormalized` to `toName`.
+ * Touches every session that contains a matching exercise.
+ */
+export async function renameExerciseEverywhere(
+  fromNormalized: string,
+  toName: string,
+  normalize: (n: string) => string,
+): Promise<number> {
+  const all = await listSessions(500)
+  let touched = 0
+  for (const session of all) {
+    let changed = false
+    const nextEx = session.exercises.map(ex => {
+      if (normalize(ex.name) === fromNormalized && ex.name !== toName) {
+        changed = true
+        return { ...ex, name: toName }
+      }
+      return ex
+    })
+    if (changed) {
+      await updateDoc(sessionRef(session.id), { exercises: nextEx })
+      touched++
+    }
+  }
+  return touched
+}
+
+/**
+ * Aggregated view: every distinct exercise (by normalized key) with its display name,
+ * total set count and total volume. Used by the exercise management + history pages.
+ */
+export type ExerciseAggregate = {
+  key: string // normalized
+  displayName: string // most-used variant
+  totalSets: number
+  totalVolumeKg: number
+  bestWeightKg: number
+  lastUsedIso: string
+  variantNames: string[] // all raw spellings seen
+}
+
+export async function getExerciseAggregates(
+  normalize: (n: string) => string,
+): Promise<ExerciseAggregate[]> {
+  const sessions = await listSessions(500)
+  const map = new Map<string, {
+    displayCounts: Map<string, number>
+    totalSets: number
+    totalVolumeKg: number
+    bestWeightKg: number
+    lastUsedIso: string
+    variantNames: Set<string>
+  }>()
+  for (const s of sessions) {
+    for (const ex of s.exercises) {
+      const name = ex.name.trim()
+      if (!name) continue
+      const key = normalize(name)
+      const entry = map.get(key) ?? {
+        displayCounts: new Map<string, number>(),
+        totalSets: 0,
+        totalVolumeKg: 0,
+        bestWeightKg: 0,
+        lastUsedIso: '',
+        variantNames: new Set<string>(),
+      }
+      entry.displayCounts.set(name, (entry.displayCounts.get(name) ?? 0) + 1)
+      entry.variantNames.add(name)
+      entry.totalSets += ex.sets.length
+      for (const set of ex.sets) {
+        entry.totalVolumeKg += set.reps * Number(set.weight)
+        if (Number(set.weight) > entry.bestWeightKg) entry.bestWeightKg = Number(set.weight)
+      }
+      if (s.date > entry.lastUsedIso) entry.lastUsedIso = s.date
+      map.set(key, entry)
+    }
+  }
+  const out: ExerciseAggregate[] = []
+  for (const [key, v] of map) {
+    // pick most-frequent spelling as displayName
+    let bestName = ''
+    let bestCount = 0
+    for (const [n, c] of v.displayCounts) {
+      if (c > bestCount) { bestName = n; bestCount = c }
+    }
+    out.push({
+      key,
+      displayName: bestName,
+      totalSets: v.totalSets,
+      totalVolumeKg: v.totalVolumeKg,
+      bestWeightKg: v.bestWeightKg,
+      lastUsedIso: v.lastUsedIso,
+      variantNames: [...v.variantNames],
+    })
+  }
+  out.sort((a, b) => b.totalSets - a.totalSets)
+  return out
+}

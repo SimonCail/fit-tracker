@@ -7,6 +7,7 @@ import { Today } from './pages/Today'
 import { SessionPage } from './pages/Session'
 import { History } from './pages/History'
 import { Evolution } from './pages/Evolution'
+import { ExercisesPage } from './pages/Exercises'
 import { ConfirmProvider, Spinner, TooltipProvider } from './components/ui'
 import { applyTheme, useSettings, watchSystemTheme } from './store/settings'
 import { deviceTimezone, readPrefs, writePrefs } from './lib/prefsSync'
@@ -77,6 +78,7 @@ function App() {
               <Route path="session/:id" element={<SessionPage />} />
               <Route path="history" element={<History />} />
               <Route path="evolution" element={<Evolution />} />
+              <Route path="exercises" element={<ExercisesPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>
