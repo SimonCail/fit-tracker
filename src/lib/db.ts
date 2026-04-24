@@ -99,6 +99,24 @@ export async function findOrCreateSessionOnDate(date: string): Promise<Session> 
   return createSession(date)
 }
 
+/**
+ * Duplicate a session's structure (exercise names) into another date.
+ * Sets are NOT copied — user fills fresh reps/weight.
+ * If a session already exists at `toDate`, its exercises are replaced with the template.
+ */
+export async function duplicateSession(fromId: string, toDate: string): Promise<Session> {
+  const source = await getSession(fromId)
+  if (!source) throw new Error('Séance source introuvable')
+  const templateExercises: Exercise[] = source.exercises.map(ex => ({
+    id: uuid(),
+    name: ex.name,
+    sets: [],
+  }))
+  const target = await findOrCreateSessionOnDate(toDate)
+  await updateDoc(sessionRef(target.id), { exercises: templateExercises })
+  return { ...target, exercises: templateExercises }
+}
+
 export async function updateSession(id: string, patch: Partial<Pick<Session, 'date' | 'notes'>>) {
   await updateDoc(sessionRef(id), patch)
 }

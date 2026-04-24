@@ -20,6 +20,7 @@ import {
 } from '../components/ui'
 import {
   deleteWeighIn,
+  duplicateSession,
   findOrCreateSessionOnDate,
   listSessions,
   listWeighIns,
@@ -195,10 +196,15 @@ export function Today() {
       <DatePickerModal
         open={datePickerOpen}
         onOpenChange={setDatePickerOpen}
-        sessionsByDate={sessions.map(s => s.date)}
-        onPick={async date => {
+        sessions={sessions}
+        onPick={async (date, sourceId) => {
           setDatePickerOpen(false)
-          await goToSession(date)
+          if (sourceId) {
+            const s = await duplicateSession(sourceId, date)
+            nav(`/session/${s.id}`)
+          } else {
+            await goToSession(date)
+          }
         }}
       />
     </>
@@ -554,37 +560,45 @@ function SessionRow({
 function DatePickerModal({
   open,
   onOpenChange,
-  sessionsByDate,
+  sessions,
   onPick,
 }: {
   open: boolean
   onOpenChange: (o: boolean) => void
-  sessionsByDate: string[]
-  onPick: (date: string) => void
+  sessions: Session[]
+  onPick: (date: string, sourceId: string | null) => void
 }) {
   const [date, setDate] = useState(todayIso())
-  const sessionsSet = useMemo(() => new Set(sessionsByDate), [sessionsByDate])
-  const existing = sessionsSet.has(date)
+  const [sourceId, setSourceId] = useState<string | null>(null)
+  const sessionsByDate = useMemo(() => new Set(sessions.map(s => s.date)), [sessions])
+  const existing = sessionsByDate.has(date)
 
   useEffect(() => {
-    if (open) setDate(todayIso())
+    if (open) {
+      setDate(todayIso())
+      setSourceId(null)
+    }
   }, [open])
+
+  // Distinct past sessions usable as templates (has at least 1 exercise).
+  const templates = useMemo(() => {
+    return sessions.filter(s => s.exercises.length > 0).slice(0, 30)
+  }, [sessions])
+
+  const actionLabel = sourceId ? 'Dupliquer' : existing ? 'Reprendre' : 'Commencer'
 
   return (
     <Modal open={open} onOpenChange={onOpenChange}>
       <ModalContent>
         <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text-dim)] font-medium">Nouvelle séance</p>
-        <h3 className="font-display text-2xl mt-1 font-semibold">Pour quelle date ?</h3>
-        <p className="text-sm text-[color:var(--color-text-dim)] mt-2">
-          Une seule séance par jour — si tu as déjà logué une séance ce jour-là, elle sera reprise.
-        </p>
+        <h3 className="font-display text-2xl mt-1 font-semibold">Date et template</h3>
 
-        <div className="flex gap-2 mt-6">
-          <QuickDate label="Aujourd'hui" value={todayIso()} current={date} onChange={setDate} />
-          <QuickDate label="Hier" value={yesterdayIso()} current={date} onChange={setDate} />
-        </div>
-        <div className="mt-3 min-w-0">
-          <Label className="block mb-2">Autre date</Label>
+        <div className="mt-5">
+          <Label className="block mb-2">Date</Label>
+          <div className="flex gap-2 mb-2">
+            <QuickDate label="Aujourd'hui" value={todayIso()} current={date} onChange={setDate} />
+            <QuickDate label="Hier" value={yesterdayIso()} current={date} onChange={setDate} />
+          </div>
           <Input
             type="date"
             value={date}
@@ -592,22 +606,74 @@ function DatePickerModal({
             max={todayIso()}
             className="h-11 w-full min-w-0"
           />
+          {existing && !sourceId && (
+            <p className="text-xs text-[color:var(--color-accent)] mt-2 flex items-center gap-1.5">
+              <Pencil size={12} /> Une séance existe déjà — elle sera ouverte.
+            </p>
+          )}
+          {existing && sourceId && (
+            <p className="text-xs text-[color:var(--color-danger)] mt-2 flex items-center gap-1.5">
+              ⚠ Les exercices existants du {format(parseISO(date), 'd MMM', { locale: fr })} seront remplacés.
+            </p>
+          )}
         </div>
 
-        {existing && (
-          <p className="text-xs text-[color:var(--color-accent)] mt-3 flex items-center gap-1.5">
-            <Pencil size={12} /> Une séance existe déjà — elle sera ouverte.
-          </p>
-        )}
+        <div className="mt-5">
+          <Label className="block mb-2">Partir de</Label>
+          <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+            <TemplateChoice
+              selected={sourceId === null}
+              title="Séance vide"
+              subtitle="Tu ajoutes les exos à la main"
+              onClick={() => setSourceId(null)}
+            />
+            {templates.map(s => (
+              <TemplateChoice
+                key={s.id}
+                selected={sourceId === s.id}
+                title={s.notes || 'Séance'}
+                subtitle={`${format(parseISO(s.date), 'd MMM', { locale: fr })} · ${s.exercises.length} exos (${s.exercises.map(e => e.name).slice(0, 2).join(', ')}${s.exercises.length > 2 ? '…' : ''})`}
+                onClick={() => setSourceId(s.id)}
+              />
+            ))}
+          </div>
+        </div>
 
         <div className="mt-6 flex justify-end gap-2">
           <Button variant="secondary" onClick={() => onOpenChange(false)}>Annuler</Button>
-          <Button variant="accent" onClick={() => onPick(date)}>
-            {existing ? 'Reprendre' : 'Commencer'}
+          <Button variant="accent" onClick={() => onPick(date, sourceId)}>
+            {actionLabel}
           </Button>
         </div>
       </ModalContent>
     </Modal>
+  )
+}
+
+function TemplateChoice({
+  selected,
+  title,
+  subtitle,
+  onClick,
+}: {
+  selected: boolean
+  title: string
+  subtitle: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full text-left px-3 py-2 rounded-xl border-2 transition-colors cursor-pointer ${
+        selected
+          ? 'border-[color:var(--color-accent)] bg-[color:var(--color-accent-soft)]'
+          : 'border-[color:var(--color-border)] hover:border-[color:var(--color-border-strong)] hover:bg-[color:var(--color-surface-2)]/60'
+      }`}
+    >
+      <p className={`text-sm font-medium truncate ${selected ? 'text-[color:var(--color-accent)]' : 'text-[color:var(--color-text)]'}`}>{title}</p>
+      <p className="text-[10px] text-[color:var(--color-text-dim)] truncate">{subtitle}</p>
+    </button>
   )
 }
 
