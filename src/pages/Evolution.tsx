@@ -53,18 +53,33 @@ export function Evolution() {
   const cutoff = format(subDays(new Date(), rangeDays), 'yyyy-MM-dd')
 
   const weightSeries = useMemo(() => {
-    return [...weighIns]
-      .filter(w => w.date >= cutoff)
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .map(w => ({ date: w.date, value: round(fromKg(w.weight, unit), 1) }))
+    const byDate = new Map<string, { date: string; morning: number | null; evening: number | null }>()
+    for (const w of weighIns) {
+      if (w.date < cutoff) continue
+      const row = byDate.get(w.date) ?? { date: w.date, morning: null, evening: null }
+      const v = round(fromKg(w.weight, unit), 1)
+      if (w.slot === 'evening') row.evening = v
+      else row.morning = v // default for legacy entries without slot
+      byDate.set(w.date, row)
+    }
+    return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
   }, [weighIns, cutoff, unit])
 
-  const weightDelta = useMemo(() => {
-    if (weightSeries.length < 2) return null
-    const first = weightSeries[0].value
-    const last = weightSeries[weightSeries.length - 1].value
-    return round(last - first, 1)
+  const lastWeight = useMemo(() => {
+    if (weightSeries.length === 0) return null
+    const last = weightSeries[weightSeries.length - 1]
+    // Prefer evening (latest of the day), else morning
+    return last.evening ?? last.morning
   }, [weightSeries])
+
+  const weightDelta = useMemo(() => {
+    if (weightSeries.length < 2 || lastWeight === null) return null
+    const first = weightSeries.find(r => r.morning !== null || r.evening !== null)
+    if (!first) return null
+    const firstV = first.morning ?? first.evening
+    if (firstV === null) return null
+    return round(lastWeight - firstV, 1)
+  }, [weightSeries, lastWeight])
 
   const stats = useMemo(() => computeStats(sessions.filter(s => s.date >= cutoff)), [sessions, cutoff])
 
@@ -114,17 +129,33 @@ export function Evolution() {
             </div>
             {weightSeries.length >= 2 ? (
               <Card className="p-5">
-                <div className="flex items-baseline gap-3 mb-4">
-                  <p className="font-display text-5xl tabular leading-none">{weightSeries[weightSeries.length - 1].value}</p>
-                  <p className="text-sm text-[color:var(--color-text-dim)]">{unit}</p>
+                <div className="flex items-baseline justify-between mb-4">
+                  <div className="flex items-baseline gap-3">
+                    <p className="font-display text-5xl tabular leading-none">{lastWeight}</p>
+                    <p className="text-sm text-[color:var(--color-text-dim)]">{unit}</p>
+                  </div>
+                  <div className="flex items-center gap-3 text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-text-dim)] font-medium">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-[color:var(--color-accent)]" />
+                      Matin
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#a78bfa]" />
+                      Soir
+                    </span>
+                  </div>
                 </div>
                 <div className="h-52 -mx-2">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={weightSeries}>
                       <defs>
-                        <linearGradient id="weightGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="var(--color-accent)" stopOpacity={0.35} />
+                        <linearGradient id="morningGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="var(--color-accent)" stopOpacity={0.3} />
                           <stop offset="100%" stopColor="var(--color-accent)" stopOpacity={0} />
+                        </linearGradient>
+                        <linearGradient id="eveningGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#a78bfa" stopOpacity={0.25} />
+                          <stop offset="100%" stopColor="#a78bfa" stopOpacity={0} />
                         </linearGradient>
                       </defs>
                       <CartesianGrid stroke="var(--color-border)" vertical={false} strokeDasharray="3 3" />
@@ -145,9 +176,30 @@ export function Evolution() {
                           fontFamily: 'var(--font-mono)',
                         }}
                         labelFormatter={d => format(parseISO(d as string), 'd MMM yyyy', { locale: fr })}
-                        formatter={v => [`${v} ${unit}`, 'Poids']}
+                        formatter={(v, name) => [v !== null && v !== undefined ? `${v} ${unit}` : '—', name]}
                       />
-                      <Area type="monotone" dataKey="value" stroke="var(--color-accent)" strokeWidth={2.5} fill="url(#weightGrad)" />
+                      <Area
+                        type="monotone"
+                        dataKey="morning"
+                        name="Matin"
+                        stroke="var(--color-accent)"
+                        strokeWidth={2.5}
+                        fill="url(#morningGrad)"
+                        connectNulls
+                        dot={{ r: 3, fill: 'var(--color-accent)', strokeWidth: 0 }}
+                        activeDot={{ r: 5 }}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="evening"
+                        name="Soir"
+                        stroke="#a78bfa"
+                        strokeWidth={2.5}
+                        fill="url(#eveningGrad)"
+                        connectNulls
+                        dot={{ r: 3, fill: '#a78bfa', strokeWidth: 0 }}
+                        activeDot={{ r: 5 }}
+                      />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>

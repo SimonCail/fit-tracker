@@ -443,7 +443,7 @@ function AddExercise({ suggestions, onAdd }: { suggestions: string[]; onAdd: (na
           onBlur={() => setTimeout(() => setFocused(false), 150)}
           placeholder="Ex: Développé couché"
         />
-        <Button type="submit" variant="primary" disabled={!name.trim()}>
+        <Button type="submit" variant="accent" disabled={!name.trim()}>
           <Plus size={16} /> Ajouter
         </Button>
       </form>
