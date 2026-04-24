@@ -19,6 +19,7 @@ import {
   useConfirm,
 } from '../components/ui'
 import {
+  createSession,
   deleteWeighIn,
   duplicateSession,
   findOrCreateSessionOnDate,
@@ -59,7 +60,10 @@ export function Today() {
   useEffect(() => { load() }, [])
 
   const todayKey = todayIso()
-  const todaySession = sessions.find(s => s.date === todayKey)
+  // When multiple sessions exist today (e.g. muscu + course), pick the most recent for the primary CTA.
+  const todaySessionsList = sessions.filter(s => s.date === todayKey).sort((a, b) => b.createdAt - a.createdAt)
+  const todaySession = todaySessionsList[0]
+  const hasMultipleToday = todaySessionsList.length > 1
   const todayMorning = weighIns.find(w => w.date === todayKey && w.slot === 'morning')
   const todayEvening = weighIns.find(w => w.date === todayKey && w.slot === 'evening')
   const todayPlan = weeklyPlan[dateToDayKey(new Date())]
@@ -140,8 +144,12 @@ export function Today() {
           <div className="grid gap-3 sm:grid-cols-2">
             <SessionAction
               todaySession={todaySession}
+              hasMultipleToday={hasMultipleToday}
               todayPlan={todayPlan}
-              onToday={() => goToSession(todayKey)}
+              onToday={() => {
+                if (todaySession) nav(`/session/${todaySession.id}`)
+                else goToSession(todayKey)
+              }}
               onPickDate={() => setDatePickerOpen(true)}
             />
             <WeightCard
@@ -203,7 +211,9 @@ export function Today() {
             const s = await duplicateSession(sourceId, date)
             nav(`/session/${s.id}`)
           } else {
-            await goToSession(date, type)
+            // Always create a fresh new session (don't reuse) — this entry point is for NEW sessions.
+            const s = await createSession(date, null, type)
+            nav(`/session/${s.id}`)
           }
         }}
       />
@@ -257,21 +267,28 @@ function Stat({
 
 function SessionAction({
   todaySession,
+  hasMultipleToday,
   todayPlan,
   onToday,
   onPickDate,
 }: {
   todaySession?: Session
+  hasMultipleToday?: boolean
   todayPlan?: string | null
   onToday: () => void
   onPickDate: () => void
 }) {
   const hasToday = !!todaySession
+  const typeLabel = todaySession?.type === 'running' ? 'course' : 'muscu'
   const title = hasToday
-    ? 'Reprendre la séance'
+    ? hasMultipleToday
+      ? `Reprendre (${typeLabel})`
+      : 'Reprendre la séance'
     : todayPlan || 'Commencer la séance'
   const subtitle = hasToday
-    ? (todaySession?.notes || 'Séance du jour en cours')
+    ? hasMultipleToday
+      ? `Plus récente · ${todaySession?.notes || typeLabel}`
+      : (todaySession?.notes || `Séance ${typeLabel} du jour`)
     : todayPlan
       ? 'Planifié aujourd\'hui'
       : "Logue ton entraînement d'aujourd'hui"
@@ -590,7 +607,7 @@ function DatePickerModal({
     return sessions.filter(s => s.exercises.length > 0).slice(0, 30)
   }, [sessions])
 
-  const actionLabel = sourceId ? 'Dupliquer' : existing ? 'Reprendre' : 'Commencer'
+  const actionLabel = sourceId ? 'Dupliquer' : 'Créer'
 
   return (
     <Modal open={open} onOpenChange={onOpenChange}>
@@ -629,14 +646,9 @@ function DatePickerModal({
             max={todayIso()}
             className="h-11 w-full min-w-0"
           />
-          {existing && !sourceId && (
-            <p className="text-xs text-[color:var(--color-accent)] mt-2 flex items-center gap-1.5">
-              <Pencil size={12} /> Une séance {type === 'running' ? 'course' : 'muscu'} existe déjà ce jour — elle sera ouverte.
-            </p>
-          )}
-          {existing && sourceId && (
-            <p className="text-xs text-[color:var(--color-danger)] mt-2 flex items-center gap-1.5">
-              ⚠ Une séance existe déjà le {format(parseISO(date), 'd MMM', { locale: fr })} — une nouvelle séance séparée sera créée à côté.
+          {existing && (
+            <p className="text-xs text-[color:var(--color-text-dim)] mt-2 flex items-center gap-1.5">
+              ⚠ Une séance {type === 'running' ? 'course' : 'muscu'} existe déjà le {format(parseISO(date), 'd MMM', { locale: fr })} — une {sourceId ? 'nouvelle séance séparée' : 'séance vide supplémentaire'} sera créée à côté.
             </p>
           )}
         </div>
