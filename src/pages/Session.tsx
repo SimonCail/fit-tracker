@@ -20,6 +20,7 @@ import {
 } from '../lib/db'
 import type { Exercise, ExerciseSet, Session } from '../lib/types'
 import { formatWeight, fromKg, round, toKg } from '../lib/units'
+import { normalizeExerciseName, slugifyExerciseName } from '../lib/exerciseName'
 import { useSettings } from '../store/settings'
 import { RestTimer } from '../components/RestTimer'
 
@@ -226,6 +227,7 @@ function ExerciseCard({
   onSetAdded: (name: string, weightKg: number) => void
 }) {
   const confirm = useConfirm()
+  const nav = useNavigate()
   const [reps, setReps] = useState('')
   const [weight, setWeight] = useState('')
   const [adding, setAdding] = useState(false)
@@ -302,7 +304,14 @@ function ExerciseCard({
           <TooltipContent side="left">Supprimer l'exercice</TooltipContent>
         </Tooltip>
       </header>
-      <h3 className="font-display text-2xl leading-tight">{exercise.name}</h3>
+      <button
+        onClick={() => nav(`/exercise/${slugifyExerciseName(exercise.name)}?key=${encodeURIComponent(normalizeExerciseName(exercise.name))}`)}
+        className="font-display text-2xl leading-tight text-left hover:text-[color:var(--color-accent)] transition-colors cursor-pointer inline-flex items-center gap-1.5 group"
+        title="Voir l'historique de cet exercice"
+      >
+        {exercise.name}
+        <span className="text-xs text-[color:var(--color-text-dim)] opacity-0 group-hover:opacity-100 transition-opacity">↗</span>
+      </button>
 
       {bestPreview && (
         <div className="grid grid-cols-3 gap-2 mt-3 mb-4 text-xs">
