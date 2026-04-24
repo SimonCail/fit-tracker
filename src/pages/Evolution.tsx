@@ -7,14 +7,13 @@ import { TrendingDown, TrendingUp } from 'lucide-react'
 import { Card, EmptyState, Label, Skeleton } from '../components/ui'
 import { listSessions, listWeighIns } from '../lib/db'
 import type { Session, WeighIn } from '../lib/types'
-import { estimate1RM, fromKg, round } from '../lib/units'
+import { fromKg, round } from '../lib/units'
 import { useSettings } from '../store/settings'
 
 type ExerciseStats = {
   name: string
   bestWeightKg: number
   bestReps: number
-  best1RMKg: number
   totalSets: number
   totalVolumeKg: number
   series: { date: string; weight: number }[]
@@ -259,19 +258,19 @@ function ExerciseCard({ stats, unit }: { stats: ExerciseStats; unit: 'kg' | 'lb'
       </div>
       <div className="grid grid-cols-3 gap-3 mb-3">
         <div>
-          <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium">PR</p>
+          <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium">Record</p>
           <p className="font-display text-2xl tabular">
             {round(fromKg(stats.bestWeightKg, unit), 1)}<span className="text-xs text-[color:var(--color-text-dim)] ml-1">{unit}</span>
           </p>
         </div>
         <div>
-          <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium">1RM ≈</p>
+          <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium">Meilleur reps</p>
           <p className="font-display text-2xl tabular">
-            {round(fromKg(stats.best1RMKg, unit), 0)}<span className="text-xs text-[color:var(--color-text-dim)] ml-1">{unit}</span>
+            {stats.bestReps}
           </p>
         </div>
         <div>
-          <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium">Tonnage</p>
+          <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium">Volume total</p>
           <p className="font-display text-2xl tabular">
             {formatBigNum(fromKg(stats.totalVolumeKg, unit))}<span className="text-xs text-[color:var(--color-text-dim)] ml-1">{unit}</span>
           </p>
@@ -323,14 +322,13 @@ function computeStats(sessions: Session[]): ExerciseStats[] {
     if (sets.length === 0) continue
     const bestWeightKg = Math.max(...sets.map(s => s.weightKg))
     const bestReps = Math.max(...sets.map(s => s.reps))
-    const best1RMKg = Math.max(...sets.map(s => estimate1RM(s.weightKg, s.reps)))
     const totalVolumeKg = sets.reduce((n, s) => n + s.reps * s.weightKg, 0)
     const byDate = new Map<string, number>()
     for (const s of sets) byDate.set(s.date, Math.max(byDate.get(s.date) ?? 0, s.weightKg))
     const series = [...byDate.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, weight]) => ({ date, weight }))
-    out.push({ name, bestWeightKg, bestReps, best1RMKg, totalSets: sets.length, totalVolumeKg, series })
+    out.push({ name, bestWeightKg, bestReps, totalSets: sets.length, totalVolumeKg, series })
   }
   out.sort((a, b) => b.totalSets - a.totalSets)
   return out
