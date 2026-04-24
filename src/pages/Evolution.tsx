@@ -4,7 +4,7 @@ import { fr } from 'date-fns/locale'
 import { motion } from 'framer-motion'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { TrendingDown, TrendingUp } from 'lucide-react'
-import { Card, EmptyState, Label, Skeleton, Badge } from '../components/ui'
+import { Card, EmptyState, Label, Skeleton } from '../components/ui'
 import { listSessions, listWeighIns } from '../lib/db'
 import type { Session, WeighIn } from '../lib/types'
 import { estimate1RM, fromKg, round } from '../lib/units'
@@ -72,19 +72,18 @@ export function Evolution() {
     return last.evening ?? last.morning
   }, [weightSeries])
 
-  const weightDelta = useMemo(() => {
-    // Chronologically: first recorded measurement vs last recorded measurement.
-    const slotOrder = (s: 'morning' | 'evening' | null) => (s === 'evening' ? 1 : 0)
-    const sorted = [...weighIns]
-      .filter(w => w.date >= cutoff)
-      .sort((a, b) => {
-        if (a.date !== b.date) return a.date.localeCompare(b.date)
-        return slotOrder(a.slot) - slotOrder(b.slot)
-      })
-    if (sorted.length < 2) return null
-    const firstV = round(fromKg(sorted[0].weight, unit), 1)
-    const lastV = round(fromKg(sorted[sorted.length - 1].weight, unit), 1)
-    return round(lastV - firstV, 1)
+  const slotDeltas = useMemo(() => {
+    // Separate deltas for morning and evening so we only compare like-with-like.
+    function deltaFor(slot: 'morning' | 'evening'): number | null {
+      const filtered = weighIns
+        .filter(w => w.date >= cutoff && (w.slot ?? 'morning') === slot)
+        .sort((a, b) => a.date.localeCompare(b.date))
+      if (filtered.length < 2) return null
+      const first = round(fromKg(filtered[0].weight, unit), 1)
+      const last = round(fromKg(filtered[filtered.length - 1].weight, unit), 1)
+      return round(last - first, 1)
+    }
+    return { morning: deltaFor('morning'), evening: deltaFor('evening') }
   }, [weighIns, cutoff, unit])
 
   const stats = useMemo(() => computeStats(sessions.filter(s => s.date >= cutoff)), [sessions, cutoff])
@@ -124,14 +123,16 @@ export function Evolution() {
       ) : (
         <div className="space-y-10">
           <section>
-            <div className="flex items-baseline justify-between mb-4">
+            <div className="flex items-baseline justify-between gap-2 mb-4 flex-wrap">
               <Label>Poids corporel</Label>
-              {weightDelta !== null && (
-                <Badge className={weightDelta < 0 ? 'text-[color:var(--color-success)]' : weightDelta > 0 ? 'text-[color:var(--color-accent)]' : ''}>
-                  {weightDelta > 0 ? <TrendingUp size={12} /> : weightDelta < 0 ? <TrendingDown size={12} /> : null}
-                  {weightDelta > 0 ? '+' : ''}{weightDelta} {unit}
-                </Badge>
-              )}
+              <div className="flex items-center gap-2 flex-wrap">
+                {slotDeltas.morning !== null && (
+                  <DeltaBadge label="Matin" value={slotDeltas.morning} unit={unit} dotColor="var(--color-accent)" />
+                )}
+                {slotDeltas.evening !== null && (
+                  <DeltaBadge label="Soir" value={slotDeltas.evening} unit={unit} dotColor="#a78bfa" />
+                )}
+              </div>
             </div>
             {weightSeries.length >= 2 ? (
               <Card className="p-5">
@@ -231,6 +232,21 @@ export function Evolution() {
         </div>
       )}
     </motion.div>
+  )
+}
+
+function DeltaBadge({ label, value, unit, dotColor }: { label: string; value: number; unit: 'kg' | 'lb'; dotColor: string }) {
+  const color = value < 0 ? 'var(--color-success)' : value > 0 ? 'var(--color-accent)' : 'var(--color-text-dim)'
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] px-2.5 py-0.5 text-xs font-medium"
+      style={{ color }}
+    >
+      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: dotColor }} />
+      <span className="text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium">{label}</span>
+      {value > 0 ? <TrendingUp size={11} /> : value < 0 ? <TrendingDown size={11} /> : null}
+      <span className="tabular">{value > 0 ? '+' : ''}{value} {unit}</span>
+    </span>
   )
 }
 
