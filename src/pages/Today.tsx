@@ -149,6 +149,7 @@ export function Today() {
               morning={todayMorning}
               evening={todayEvening}
               lastWeighIn={lastWeighIn}
+              allWeighIns={weighIns}
               onChanged={load}
             />
           </div>
@@ -307,6 +308,7 @@ function WeightCard({
   morning,
   evening,
   lastWeighIn,
+  allWeighIns,
   onChanged,
 }: {
   unit: 'kg' | 'lb'
@@ -314,6 +316,7 @@ function WeightCard({
   morning?: WeighIn
   evening?: WeighIn
   lastWeighIn?: WeighIn
+  allWeighIns: WeighIn[]
   onChanged: () => void
 }) {
   const [antedateOpen, setAntedateOpen] = useState(false)
@@ -349,6 +352,7 @@ function WeightCard({
           open={antedateOpen}
           onOpenChange={setAntedateOpen}
           unit={unit}
+          allWeighIns={allWeighIns}
           onSaved={() => { setAntedateOpen(false); onChanged() }}
         />
       </div>
@@ -611,11 +615,13 @@ function WeighInAntedateModal({
   open,
   onOpenChange,
   unit,
+  allWeighIns,
   onSaved,
 }: {
   open: boolean
   onOpenChange: (o: boolean) => void
   unit: 'kg' | 'lb'
+  allWeighIns: WeighIn[]
   onSaved: () => void
 }) {
   const [date, setDate] = useState(todayIso())
@@ -630,6 +636,17 @@ function WeighInAntedateModal({
       setValue('')
     }
   }, [open])
+
+  // Prefill the weight when date+slot matches an existing entry.
+  useEffect(() => {
+    if (!open) return
+    const existing = allWeighIns.find(w => w.date === date && (w.slot ?? 'morning') === slot)
+    if (existing) {
+      setValue(String(round(fromKg(existing.weight, unit), 1)))
+    } else {
+      setValue('')
+    }
+  }, [open, date, slot, allWeighIns, unit])
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
