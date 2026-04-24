@@ -757,6 +757,7 @@ function QuickDate({ label, value, current, onChange }: { label: string; value: 
   const active = value === current
   return (
     <button
+      type="button"
       onClick={() => onChange(value)}
       className={`flex-1 h-10 rounded-xl text-sm font-medium transition-colors cursor-pointer ${
         active
