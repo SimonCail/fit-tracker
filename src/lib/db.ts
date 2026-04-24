@@ -99,13 +99,17 @@ export async function createSession(
   return { id: docRef.id, date, notes, type, exercises: [], createdAt: Date.now() }
 }
 
-/** Find an existing session on a date, or create a new one. Ensures ≤1 session per day. */
+/**
+ * Find an existing session matching date AND type, or create a new one.
+ * Ensures ≤1 session per (date, type) — so a day can have both a strength and a running session.
+ * Legacy docs without a `type` field are treated as 'strength'.
+ */
 export async function findOrCreateSessionOnDate(date: string, type: SessionType = 'strength'): Promise<Session> {
-  const q = query(sessionsCol(), where('date', '==', date), limit(1))
+  const q = query(sessionsCol(), where('date', '==', date), limit(10))
   const snap = await getDocs(q)
-  if (!snap.empty) {
-    const d = snap.docs[0]
-    return parseSession(d.id, d.data())
+  for (const doc of snap.docs) {
+    const s = parseSession(doc.id, doc.data())
+    if (s.type === type) return s
   }
   return createSession(date, null, type)
 }
@@ -118,9 +122,13 @@ export async function updateRunningSession(
 }
 
 /**
- * Duplicate a session's structure (exercise names) into another date.
+ * Duplicate a strength session's structure (exercise names) into another date.
  * Sets are NOT copied — user fills fresh reps/weight.
- * If a session already exists at `toDate`, its exercises are replaced with the template.
+ *
+ * Rules:
+ * - If an EMPTY strength session already exists at `toDate`, fill it with the template.
+ * - If a strength session with content exists, create a SEPARATE new session to avoid clobbering.
+ * - Otherwise create fresh.
  */
 export async function duplicateSession(fromId: string, toDate: string): Promise<Session> {
   const source = await getSession(fromId)
@@ -130,9 +138,20 @@ export async function duplicateSession(fromId: string, toDate: string): Promise<
     name: ex.name,
     sets: [],
   }))
-  const target = await findOrCreateSessionOnDate(toDate)
-  await updateDoc(sessionRef(target.id), { exercises: templateExercises })
-  return { ...target, exercises: templateExercises }
+  // Look for an empty strength session on toDate we can reuse.
+  const q = query(sessionsCol(), where('date', '==', toDate), limit(10))
+  const snap = await getDocs(q)
+  for (const doc of snap.docs) {
+    const s = parseSession(doc.id, doc.data())
+    if (s.type === 'strength' && s.exercises.length === 0) {
+      await updateDoc(sessionRef(s.id), { exercises: templateExercises })
+      return { ...s, exercises: templateExercises }
+    }
+  }
+  // Otherwise create a brand-new session (does NOT touch any existing session).
+  const created = await createSession(toDate, source.notes, 'strength')
+  await updateDoc(sessionRef(created.id), { exercises: templateExercises })
+  return { ...created, exercises: templateExercises }
 }
 
 export async function updateSession(id: string, patch: Partial<Pick<Session, 'date' | 'notes' | 'type'>>) {

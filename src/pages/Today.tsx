@@ -571,8 +571,11 @@ function DatePickerModal({
   const [date, setDate] = useState(todayIso())
   const [sourceId, setSourceId] = useState<string | null>(null)
   const [type, setType] = useState<SessionType>('strength')
-  const sessionsByDate = useMemo(() => new Set(sessions.map(s => s.date)), [sessions])
-  const existing = sessionsByDate.has(date)
+  const existingSameType = useMemo(
+    () => sessions.some(s => s.date === date && s.type === type && s.exercises.length > 0),
+    [sessions, date, type],
+  )
+  const existing = existingSameType
 
   useEffect(() => {
     if (open) {
@@ -628,12 +631,12 @@ function DatePickerModal({
           />
           {existing && !sourceId && (
             <p className="text-xs text-[color:var(--color-accent)] mt-2 flex items-center gap-1.5">
-              <Pencil size={12} /> Une séance existe déjà — elle sera ouverte.
+              <Pencil size={12} /> Une séance {type === 'running' ? 'course' : 'muscu'} existe déjà ce jour — elle sera ouverte.
             </p>
           )}
           {existing && sourceId && (
             <p className="text-xs text-[color:var(--color-danger)] mt-2 flex items-center gap-1.5">
-              ⚠ Les exercices existants du {format(parseISO(date), 'd MMM', { locale: fr })} seront remplacés.
+              ⚠ Une séance existe déjà le {format(parseISO(date), 'd MMM', { locale: fr })} — une nouvelle séance séparée sera créée à côté.
             </p>
           )}
         </div>
