@@ -22,12 +22,15 @@ export function Layout() {
       {/* Top bar: desktop only (sm+). On mobile we use a bottom tab bar exclusively. */}
       <div className="sticky top-0 z-30 pointer-events-none hidden sm:block">
         <div className="safe-top pt-3 pb-3 px-3">
-          <div className="max-w-xl mx-auto pointer-events-auto">
+          <div className="max-w-xl md:max-w-2xl mx-auto pointer-events-auto">
             <div className="liquid-glass rounded-full pl-3 pr-2 h-14 flex items-center gap-2">
               <Link to="/" className="flex items-center gap-2 group shrink-0">
-                <div className="w-8 h-8 rounded-xl bg-[color:var(--color-text)] text-[color:var(--color-bg)] flex items-center justify-center group-hover:bg-[color:var(--color-accent)] group-hover:text-[color:var(--color-accent-text)] group-hover:rotate-[-8deg] transition-all duration-300">
-                  <Dumbbell size={16} />
-                </div>
+                <img
+                  src="/favicon.svg"
+                  alt=""
+                  aria-hidden="true"
+                  className="w-8 h-8 rounded-xl group-hover:rotate-[-8deg] transition-transform duration-300"
+                />
                 <span className="font-display text-lg tracking-tight">Fit</span>
               </Link>
               <nav className="flex-1 flex justify-center">
@@ -71,17 +74,50 @@ export function Layout() {
         </div>
       </div>
 
-      <main className="flex-1 max-w-xl w-full mx-auto px-4 pb-28 pt-4 sm:pt-0 safe-top sm:[padding-top:0]">
+      {/* Mobile-only top header: compact liquid-glass pill with brand, mirrors the bottom tab bar. */}
+      <MobileTopHeader onSettingsClick={() => setSettingsOpen(true)} />
+
+      <main className="flex-1 w-full mx-auto max-w-xl md:max-w-2xl lg:max-w-3xl px-4 sm:px-6 pb-28 sm:pb-10 pt-2 sm:pt-0">
         <Outlet />
       </main>
 
       <SettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} />
-      <MobileTabBar loc={loc.pathname} onSettingsClick={() => setSettingsOpen(true)} />
+      <MobileTabBar loc={loc.pathname} />
     </div>
   )
 }
 
-function MobileTabBar({ loc, onSettingsClick }: { loc: string; onSettingsClick: () => void }) {
+function MobileTopHeader({ onSettingsClick }: { onSettingsClick: () => void }) {
+  return (
+    <header className="sm:hidden sticky top-0 z-30 pointer-events-none">
+      <div className="safe-top pt-2 pb-2 px-4">
+        <div className="max-w-xl mx-auto pointer-events-auto">
+          <div className="liquid-glass rounded-full h-11 pl-2.5 pr-2 flex items-center gap-2">
+            <Link to="/" className="flex items-center gap-2 group shrink-0">
+              <img
+                src="/favicon.svg"
+                alt=""
+                aria-hidden="true"
+                className="w-7 h-7 rounded-xl"
+              />
+              <span className="font-display text-base tracking-tight">Fit</span>
+            </Link>
+            <div className="flex-1" />
+            <button
+              onClick={onSettingsClick}
+              aria-label="Réglages"
+              className="w-8 h-8 flex items-center justify-center rounded-full text-[color:var(--color-text-dim)] hover:text-[color:var(--color-text)] active:bg-[color:var(--color-surface-2)] transition-colors cursor-pointer shrink-0"
+            >
+              <Settings size={16} />
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+  )
+}
+
+function MobileTabBar({ loc }: { loc: string }) {
   const tabs = [
     { to: '/', icon: Clock, end: true, label: "Aujourd'hui" },
     { to: '/history', icon: Dumbbell, label: 'Historique' },
@@ -118,13 +154,6 @@ function MobileTabBar({ loc, onSettingsClick }: { loc: string; onSettingsClick: 
               </Link>
             )
           })}
-          <button
-            onClick={onSettingsClick}
-            aria-label="Réglages"
-            className="flex-1 h-12 flex items-center justify-center rounded-full text-[color:var(--color-text-dim)] hover:text-[color:var(--color-text)] transition-colors cursor-pointer"
-          >
-            <Settings size={18} />
-          </button>
         </div>
       </div>
     </nav>

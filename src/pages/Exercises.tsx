@@ -99,13 +99,13 @@ export function ExercisesPage() {
       </div>
 
       {loading ? (
-        <div className="space-y-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
           {[0, 1, 2, 3, 4].map(i => <Skeleton key={i} className="h-20 rounded-2xl" />)}
         </div>
       ) : filtered.length === 0 ? (
         <EmptyState title="Aucun exercice" subtitle="Dès que tu loges des séries, ils apparaîtront ici." />
       ) : (
-        <div className="space-y-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
           {filtered.map(agg => (
             <Card key={agg.key} className="p-4">
               {renamingKey === agg.key ? (

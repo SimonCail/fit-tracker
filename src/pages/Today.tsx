@@ -135,7 +135,7 @@ export function Today() {
         <Section>
           <div className="grid grid-cols-3 gap-2 sm:gap-3">
             <Stat value={streak} label="Streak" suffix={streak > 1 ? 'jours' : 'jour'} accent={streak > 0} icon={<Flame size={14} />} />
-            <Stat value={weekSessions.length} label="Cette semaine" suffix="séances" />
+            <Stat value={weekSessions.length} label="Semaine" suffix="séances" />
             <Stat value={formatTonnage(weekVolume, unit)} label="Tonnage 7j" suffix={unit} />
           </div>
         </Section>
@@ -248,19 +248,19 @@ function Stat({
   icon?: React.ReactNode
 }) {
   return (
-    <Card className="p-4 transition-colors hover:border-[color:var(--color-border-strong)]">
-      <div className="flex items-center gap-1.5 mb-1">
+    <Card className="p-4 flex flex-col h-full min-w-0 transition-colors hover:border-[color:var(--color-border-strong)]">
+      <div className="flex items-center gap-1.5 mb-3 min-w-0">
         {icon && (
-          <span className={accent ? 'text-[color:var(--color-accent)]' : 'text-[color:var(--color-text-dim)]'}>{icon}</span>
+          <span className={`shrink-0 ${accent ? 'text-[color:var(--color-accent)]' : 'text-[color:var(--color-text-dim)]'}`}>{icon}</span>
         )}
-        <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium">
+        <p className="text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-text-dim)] font-medium whitespace-nowrap truncate">
           {label}
         </p>
       </div>
-      <p className={`font-display text-3xl sm:text-4xl tabular leading-none ${accent ? 'text-[color:var(--color-accent)]' : ''}`}>
+      <p className={`font-display text-3xl sm:text-4xl tabular leading-none mt-auto ${accent ? 'text-[color:var(--color-accent)]' : ''}`}>
         {value}
       </p>
-      {suffix && <p className="text-xs text-[color:var(--color-text-dim)] mt-1">{suffix}</p>}
+      {suffix && <p className="text-xs text-[color:var(--color-text-dim)] mt-1 truncate">{suffix}</p>}
     </Card>
   )
 }

@@ -5,7 +5,7 @@ import {
   signInWithEmailAndPassword,
   signInWithPopup,
 } from 'firebase/auth'
-import { ArrowRight, CalendarDays, Dumbbell, Flame, Lock, Mail, Scale, Timer, Zap } from 'lucide-react'
+import { ArrowRight, CalendarDays, Flame, Lock, Mail, Scale, Timer, Zap } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { auth, isConfigured } from '../lib/firebase'
 import { Button, Input } from '../components/ui'
@@ -61,9 +61,12 @@ export function Login() {
         >
           <div className="relative">
             <div className="absolute inset-0 rounded-lg bg-[color:var(--color-accent)] opacity-20 blur-md pulse-accent" />
-            <div className="relative w-8 h-8 rounded-lg bg-[color:var(--color-text)] text-[color:var(--color-bg)] flex items-center justify-center">
-              <Dumbbell size={15} />
-            </div>
+            <img
+              src="/favicon.svg"
+              alt=""
+              aria-hidden="true"
+              className="relative w-8 h-8 rounded-lg"
+            />
           </div>
           <span className="font-display text-lg tracking-tight">Fit Tracker</span>
         </motion.div>

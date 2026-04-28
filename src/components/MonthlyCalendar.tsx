@@ -89,7 +89,7 @@ export function MonthlyCalendar({ counts, weighInDates = [], onDayClick }: Props
         </div>
       </div>
 
-      <div className="grid grid-cols-7 gap-1 mb-2">
+      <div className="grid grid-cols-7 gap-1 sm:gap-1.5 mb-2">
         {WEEKDAYS.map((d, i) => (
           <div
             key={i}
@@ -109,7 +109,7 @@ export function MonthlyCalendar({ counts, weighInDates = [], onDayClick }: Props
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -direction * 24 }}
             transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-            className="grid grid-cols-7 gap-1"
+            className="grid grid-cols-7 gap-1 sm:gap-1.5"
           >
             {days.map(day => {
               const iso = format(day, 'yyyy-MM-dd')
@@ -144,7 +144,7 @@ export function MonthlyCalendar({ counts, weighInDates = [], onDayClick }: Props
                           : undefined
                       }
                     >
-                      <span className={cn('font-display text-sm tabular leading-none', today && 'font-semibold')}>
+                      <span className={cn('font-display text-sm sm:text-base tabular leading-none', today && 'font-semibold')}>
                         {format(day, 'd')}
                       </span>
                       {hasWeigh && count === 0 && (

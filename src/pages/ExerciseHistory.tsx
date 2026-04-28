@@ -134,7 +134,7 @@ export function ExerciseHistoryPage() {
           <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium mb-2">
             Progression — poids max par jour
           </p>
-          <div className="h-44 -mx-1">
+          <div className="h-44 sm:h-56 lg:h-64 -mx-1">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={chartData}>
                 <defs>

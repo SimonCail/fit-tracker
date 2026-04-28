@@ -141,7 +141,7 @@ export function Evolution() {
                     </span>
                   </div>
                 </div>
-                <div className="h-52 -mx-2">
+                <div className="h-56 sm:h-64 lg:h-72 -mx-2">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={weightSeries}>
                       <defs>
@@ -307,7 +307,7 @@ function RunningSection({ sessions, cutoff }: { sessions: Session[]; cutoff: str
           <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium mb-2">
             Allure · min/km (plus bas = mieux)
           </p>
-          <div className="h-40 -mx-1">
+          <div className="h-40 sm:h-52 lg:h-56 -mx-1">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={chartData}>
                 <defs>
