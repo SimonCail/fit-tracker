@@ -10,6 +10,7 @@ import { Evolution } from './pages/Evolution'
 import { ExercisesPage } from './pages/Exercises'
 import { ExerciseHistoryPage } from './pages/ExerciseHistory'
 import { ConfirmProvider, Spinner, TooltipProvider } from './components/ui'
+import { PwaUpdateBanner } from './components/PwaUpdateBanner'
 import { applyTheme, useSettings, watchSystemTheme } from './store/settings'
 import { deviceTimezone, readPrefs, writePrefs } from './lib/prefsSync'
 
@@ -66,7 +67,12 @@ function App() {
   }
 
   if (!user) {
-    return <Login />
+    return (
+      <>
+        <Login />
+        <PwaUpdateBanner />
+      </>
+    )
   }
 
   return (
@@ -85,6 +91,7 @@ function App() {
             </Route>
           </Routes>
         </BrowserRouter>
+        <PwaUpdateBanner />
       </ConfirmProvider>
     </TooltipProvider>
   )
