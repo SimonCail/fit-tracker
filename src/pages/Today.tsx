@@ -84,9 +84,13 @@ export function Today() {
     return () => document.removeEventListener('visibilitychange', check)
   }, [reminders.enabled, reminders.time, weeklyPlan, todaySession])
   const lastWeighIn = weighIns[0]
+  const userBwKg = lastWeighIn?.weight ?? 0
   const weekSessions = sessions.filter(s => differenceInCalendarDays(new Date(), parseISO(s.date)) < 7)
   const weekVolume = weekSessions.reduce((acc, s) => {
-    for (const ex of s.exercises) for (const set of ex.sets) acc += set.reps * Number(set.weight)
+    for (const ex of s.exercises) {
+      const effective = ex.bodyweight ? userBwKg : 0
+      for (const set of ex.sets) acc += set.reps * (Number(set.weight) + effective)
+    }
     return acc
   }, 0)
   const streak = computeStreak(sessions)

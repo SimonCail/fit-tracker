@@ -167,7 +167,7 @@ export function History() {
               <div className="space-y-2">
                 {list.map(it =>
                   it.kind === 'session' ? (
-                    <SessionCard key={`s-${it.data.id}`} session={it.data} unit={unit} onClick={() => nav(`/session/${it.data.id}`)} />
+                    <SessionCard key={`s-${it.data.id}`} session={it.data} unit={unit} userBwKg={weighIns[0]?.weight ?? 0} onClick={() => nav(`/session/${it.data.id}`)} />
                   ) : (
                     <WeighInCard key={`w-${it.data.id}`} weighIn={it.data} unit={unit} onDelete={() => removeWeigh(it.data.id)} />
                   ),
@@ -181,7 +181,7 @@ export function History() {
   )
 }
 
-function SessionCard({ session, unit, onClick }: { session: Session; unit: 'kg' | 'lb'; onClick: () => void }) {
+function SessionCard({ session, unit, userBwKg, onClick }: { session: Session; unit: 'kg' | 'lb'; userBwKg: number; onClick: () => void }) {
   const isRunning = session.type === 'running'
 
   let subtitle: string
@@ -203,7 +203,10 @@ function SessionCard({ session, unit, onClick }: { session: Session; unit: 'kg' 
     subtitle = parts.length > 0 ? parts.join(' · ') : 'Course'
   } else {
     const sets = session.exercises.reduce((n, e) => n + e.sets.length, 0)
-    const tonnage = session.exercises.reduce((n, e) => n + e.sets.reduce((m, s) => m + s.reps * Number(s.weight), 0), 0)
+    const tonnage = session.exercises.reduce((n, e) => {
+      const eff = e.bodyweight ? userBwKg : 0
+      return n + e.sets.reduce((m, s) => m + s.reps * (Number(s.weight) + eff), 0)
+    }, 0)
     subtitle = `${session.exercises.length} exos · ${sets} séries · ${formatWeight(tonnage, unit, 0).replace('.0', '')}`
   }
 

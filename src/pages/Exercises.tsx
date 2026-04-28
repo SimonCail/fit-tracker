@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, ArrowRight, Check, Edit3, Search, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, Edit3, PersonStanding, Search, X } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { motion } from 'framer-motion'
 import { Button, Card, EmptyState, Input, Skeleton, Tooltip, TooltipContent, TooltipTrigger, useConfirm } from '../components/ui'
-import { getExerciseAggregates, renameExerciseEverywhere, type ExerciseAggregate } from '../lib/db'
+import { getExerciseAggregates, listWeighIns, renameExerciseEverywhere, setExerciseBodyweightEverywhere, type ExerciseAggregate } from '../lib/db'
 import { normalizeExerciseName, slugifyExerciseName } from '../lib/exerciseName'
 import { formatWeight, fromKg } from '../lib/units'
 import { useSettings } from '../store/settings'
@@ -15,6 +15,7 @@ export function ExercisesPage() {
   const { unit } = useSettings()
   const confirm = useConfirm()
   const [aggregates, setAggregates] = useState<ExerciseAggregate[]>([])
+  const [latestBwKg, setLatestBwKg] = useState<number>(0)
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
   const [renamingKey, setRenamingKey] = useState<string | null>(null)
@@ -24,13 +25,66 @@ export function ExercisesPage() {
   async function load() {
     setLoading(true)
     try {
-      const res = await getExerciseAggregates(normalizeExerciseName)
+      const [res, weighIns] = await Promise.all([
+        getExerciseAggregates(normalizeExerciseName),
+        listWeighIns(20),
+      ])
       setAggregates(res)
+      setLatestBwKg(weighIns[0]?.weight ?? 0)
     } finally {
       setLoading(false)
     }
   }
   useEffect(() => { load() }, [])
+
+  async function toggleBodyweight(agg: ExerciseAggregate) {
+    if (agg.bodyweight) {
+      const ok = await confirm({
+        title: `Retirer le mode poids de corps de "${agg.displayName}" ?`,
+        description: 'Les valeurs de lest existantes resteront telles quelles, mais ne seront plus comptées avec ton poids de corps.',
+        confirmLabel: 'Retirer',
+      })
+      if (!ok) return
+      setBusy(true)
+      try {
+        await setExerciseBodyweightEverywhere(agg.key, false, 0, normalizeExerciseName)
+        await load()
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
+    // Enabling: offer to subtract latest bodyweight from existing weights so they become "lest".
+    const subtract = latestBwKg > 0 && agg.bestWeightKg > 0
+    let convertExisting = false
+    if (subtract) {
+      convertExisting = await confirm({
+        title: `Marquer "${agg.displayName}" comme poids de corps ?`,
+        description: `Veux-tu retrancher ton poids de corps actuel (${Math.round(latestBwKg * 10) / 10} kg) de tes anciens poids pour qu'ils deviennent du lest ? Sinon, les poids existants seront gardés tels quels (interprétés comme du lest).`,
+        confirmLabel: 'Oui, retrancher',
+        cancelLabel: 'Garder tel quel',
+      })
+    } else {
+      const ok = await confirm({
+        title: `Marquer "${agg.displayName}" comme poids de corps ?`,
+        description: 'Les nouvelles séries auront le poids facultatif (0 = poids de corps pur, valeur > 0 = lest ajouté).',
+        confirmLabel: 'Activer',
+      })
+      if (!ok) return
+    }
+    setBusy(true)
+    try {
+      await setExerciseBodyweightEverywhere(
+        agg.key,
+        true,
+        convertExisting ? latestBwKg : 0,
+        normalizeExerciseName,
+      )
+      await load()
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const filtered = useMemo(() => {
     if (!query.trim()) return aggregates
@@ -130,13 +184,24 @@ export function ExercisesPage() {
                     onClick={() => nav(`/exercise/${slugifyExerciseName(agg.displayName)}?key=${encodeURIComponent(agg.key)}`)}
                     className="flex-1 min-w-0 text-left cursor-pointer group"
                   >
-                    <p className="font-medium truncate group-hover:text-[color:var(--color-accent)] transition-colors">{agg.displayName}</p>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <p className="font-medium truncate group-hover:text-[color:var(--color-accent)] transition-colors">{agg.displayName}</p>
+                      {agg.bodyweight && (
+                        <span className="inline-flex items-center gap-1 text-[9px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-semibold border border-[color:var(--color-border)] px-1.5 py-0.5 rounded-full shrink-0">
+                          PDC
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-2 text-[11px] text-[color:var(--color-text-dim)] mt-1 flex-wrap">
                       <span>{agg.totalSets} séries</span>
                       <span className="opacity-40">·</span>
-                      <span>Record: {formatWeight(agg.bestWeightKg, unit, 1)}</span>
-                      <span className="opacity-40">·</span>
-                      <span>Volume: {formatBigNum(fromKg(agg.totalVolumeKg, unit))} {unit}</span>
+                      <span>{agg.bodyweight ? `Lest max: ${formatWeight(agg.bestWeightKg, unit, 1)}` : `Record: ${formatWeight(agg.bestWeightKg, unit, 1)}`}</span>
+                      {!agg.bodyweight && (
+                        <>
+                          <span className="opacity-40">·</span>
+                          <span>Volume: {formatBigNum(fromKg(agg.totalVolumeKg, unit))} {unit}</span>
+                        </>
+                      )}
                       {agg.lastUsedIso && (
                         <>
                           <span className="opacity-40">·</span>
@@ -151,6 +216,23 @@ export function ExercisesPage() {
                     )}
                   </button>
                   <div className="flex items-center gap-1 shrink-0">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          onClick={() => toggleBodyweight(agg)}
+                          disabled={busy}
+                          className={`p-1.5 rounded-full transition-colors cursor-pointer ${
+                            agg.bodyweight
+                              ? 'text-[color:var(--color-accent)] bg-[color:var(--color-accent-soft)] hover:bg-[color:var(--color-accent-soft)]/70'
+                              : 'text-[color:var(--color-text-dim)] hover:text-[color:var(--color-text)] hover:bg-[color:var(--color-surface-2)]'
+                          }`}
+                          aria-label={agg.bodyweight ? 'Retirer poids de corps' : 'Marquer poids de corps'}
+                        >
+                          <PersonStanding size={14} />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="left">{agg.bodyweight ? 'Retirer poids de corps' : 'Marquer poids de corps'}</TooltipContent>
+                    </Tooltip>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <button

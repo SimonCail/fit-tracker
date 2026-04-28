@@ -8,6 +8,8 @@ export type Exercise = {
   id: string
   name: string
   sets: ExerciseSet[]
+  /** When true, sets track ADDED load (lest) only — effective weight = userBodyweight + set.weight. */
+  bodyweight?: boolean
 }
 
 export type SessionType = 'strength' | 'running'

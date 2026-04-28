@@ -35,7 +35,7 @@ export function SessionPage() {
   const [exerciseNames, setExerciseNames] = useState<string[]>([])
   const [pastPR, setPastPR] = useState<Record<string, number>>({}) // exercise name -> best kg before THIS session
   const [timerOpen, setTimerOpen] = useState(false)
-  const [prToast, setPrToast] = useState<{ name: string; weight: number } | null>(null)
+  const [prToast, setPrToast] = useState<{ name: string; weight: number; bodyweight: boolean } | null>(null)
   const notesTimer = useRef<number | null>(null)
 
   async function load() {
@@ -101,11 +101,11 @@ export function SessionPage() {
     nav('/', { replace: true })
   }
 
-  function onSetAdded(exerciseName: string, weightKg: number) {
+  function onSetAdded(exerciseName: string, weightKg: number, bodyweight: boolean) {
     const pr = pastPR[exerciseName.trim()] ?? 0
     if (weightKg > pr) {
       setPastPR(prev => ({ ...prev, [exerciseName.trim()]: weightKg }))
-      setPrToast({ name: exerciseName, weight: weightKg })
+      setPrToast({ name: exerciseName, weight: weightKg, bodyweight })
       window.setTimeout(() => setPrToast(null), 3500)
     }
     // Timer never auto-opens — user triggers it manually via the header button.
@@ -199,7 +199,7 @@ export function SessionPage() {
             <div className="pointer-events-auto rounded-full bg-[color:var(--color-accent)] text-white px-5 py-2.5 flex items-center gap-2 shadow-2xl">
               <Trophy size={16} />
               <span className="text-sm font-medium">
-                Nouveau PR sur {prToast.name} — {formatWeight(prToast.weight, unit, 1)}
+                Nouveau PR sur {prToast.name} — {prToast.bodyweight ? `lest +${round(fromKg(prToast.weight, unit), 1)} ${unit}` : formatWeight(prToast.weight, unit, 1)}
               </span>
             </div>
           </motion.div>
@@ -224,7 +224,7 @@ function ExerciseCard({
   unit: 'kg' | 'lb'
   previousPR: number
   onChange: () => void
-  onSetAdded: (name: string, weightKg: number) => void
+  onSetAdded: (name: string, weightKg: number, bodyweight: boolean) => void
 }) {
   const confirm = useConfirm()
   const nav = useNavigate()
@@ -248,17 +248,20 @@ function ExerciseCard({
     return { set: best, volumeKg }
   }, [exercise.sets])
 
+  const isBw = !!exercise.bodyweight
+
   async function onAddSet(e: React.FormEvent) {
     e.preventDefault()
-    if (!reps || !weight || adding) return
+    if (!reps || adding) return
+    if (!isBw && !weight) return
     setAdding(true)
-    const weightKg = toKg(Number(weight), unit)
+    const weightKg = weight ? toKg(Number(weight), unit) : 0
     try {
       await addSet(sessionId, exercise.id, Number(reps), weightKg)
       setReps('')
       setWeight('')
       onChange()
-      onSetAdded(exercise.name, weightKg)
+      onSetAdded(exercise.name, weightKg, isBw)
     } finally {
       setAdding(false)
     }
@@ -275,6 +278,11 @@ function ExerciseCard({
       <header className="flex items-start justify-between gap-3 mb-1">
         <div className="flex items-baseline gap-2 min-w-0">
           <span className="font-mono text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)]">#{String(index).padStart(2, '0')}</span>
+          {exercise.bodyweight && (
+            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-semibold border border-[color:var(--color-border)] px-1.5 py-0.5 rounded-full">
+              PDC
+            </span>
+          )}
           {previousPR > 0 && bestKg > previousPR && (
             <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-[color:var(--color-accent)] font-semibold">
               <Trophy size={10} /> PR
@@ -315,8 +323,19 @@ function ExerciseCard({
 
       {bestPreview && (
         <div className="grid grid-cols-3 gap-2 mt-3 mb-4 text-xs">
-          <MiniStat label="Top" value={`${bestPreview.set.reps}×${round(fromKg(Number(bestPreview.set.weight), unit), 1)}`} />
-          <MiniStat label="Volume" value={formatVolume(bestPreview.volumeKg, unit)} suffix={unit} />
+          <MiniStat
+            label="Top"
+            value={`${bestPreview.set.reps}×${
+              isBw && Number(bestPreview.set.weight) <= 0
+                ? 'PDC'
+                : `${isBw ? '+' : ''}${round(fromKg(Number(bestPreview.set.weight), unit), 1)}`
+            }`}
+          />
+          <MiniStat
+            label="Volume"
+            value={isBw ? `${exercise.sets.reduce((n, s) => n + s.reps, 0)}` : formatVolume(bestPreview.volumeKg, unit)}
+            suffix={isBw ? 'reps' : unit}
+          />
           <MiniStat label="Séries" value={String(exercise.sets.length)} />
         </div>
       )}
@@ -326,7 +345,7 @@ function ExerciseCard({
           <div className="grid grid-cols-[2rem_1fr_1fr_2rem] items-center gap-2 px-2 pb-1.5 border-b border-[color:var(--color-border)] text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium">
             <span>#</span>
             <span className="text-center">Reps</span>
-            <span className="text-center">{unit}</span>
+            <span className="text-center">{isBw ? `Lest ${unit}` : unit}</span>
             <span />
           </div>
           <div className="divide-y divide-[color:var(--color-border)]">
@@ -338,6 +357,7 @@ function ExerciseCard({
                 index={i + 1}
                 set={set}
                 unit={unit}
+                bodyweight={isBw}
                 onChange={onChange}
               />
             ))}
@@ -359,7 +379,7 @@ function ExerciseCard({
           />
         </div>
         <div className="relative">
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium pointer-events-none">{unit}</span>
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium pointer-events-none">{isBw ? `lest ${unit}` : unit}</span>
           <Input
             type="number"
             step="0.5"
@@ -367,11 +387,11 @@ function ExerciseCard({
             onChange={e => setWeight(e.target.value)}
             min="0"
             inputMode="decimal"
-            className="h-11 pr-10 text-right font-display text-lg tabular"
-            placeholder="0.0"
+            className={`h-11 text-right font-display text-lg tabular ${isBw ? 'pr-[5.5rem]' : 'pr-10'}`}
+            placeholder={isBw ? '0' : '0.0'}
           />
         </div>
-        <Button type="submit" variant="accent" size="icon" disabled={adding || !reps || !weight} aria-label="Ajouter la série">
+        <Button type="submit" variant="accent" size="icon" disabled={adding || !reps || (!isBw && !weight)} aria-label="Ajouter la série">
           <Plus size={18} />
         </Button>
       </form>
@@ -381,7 +401,7 @@ function ExerciseCard({
           onClick={reuseLast}
           className="text-xs text-[color:var(--color-text-dim)] hover:text-[color:var(--color-accent)] mt-3 transition-colors cursor-pointer inline-flex items-center gap-1"
         >
-          ↻ Reprendre {lastSet.reps} × {formatWeight(Number(lastSet.weight), unit, 1)}
+          ↻ Reprendre {lastSet.reps} × {formatLoadDisplay(Number(lastSet.weight), unit, isBw)}
         </button>
       )}
     </Card>
@@ -392,6 +412,15 @@ function formatVolume(kg: number, unit: 'kg' | 'lb'): string {
   const v = fromKg(kg, unit)
   if (v >= 1000) return `${round(v / 1000, 1)}k`
   return String(Math.round(v))
+}
+
+/** Display the loaded weight for a set, accounting for bodyweight mode. */
+function formatLoadDisplay(weightKg: number, unit: 'kg' | 'lb', bodyweight: boolean): string {
+  if (bodyweight) {
+    if (weightKg <= 0) return 'PDC'
+    return `+${round(fromKg(weightKg, unit), 1)} ${unit}`
+  }
+  return formatWeight(weightKg, unit, 1)
 }
 
 function MiniStat({ label, value, suffix }: { label: string; value: string; suffix?: string }) {
@@ -412,6 +441,7 @@ function SetRow({
   index,
   set,
   unit,
+  bodyweight,
   onChange,
 }: {
   sessionId: string
@@ -419,6 +449,7 @@ function SetRow({
   index: number
   set: ExerciseSet
   unit: 'kg' | 'lb'
+  bodyweight: boolean
   onChange: () => void
 }) {
   const [editing, setEditing] = useState(false)
@@ -483,7 +514,9 @@ function SetRow({
       </span>
       <span className="font-display text-lg tabular text-center leading-none">{set.reps}</span>
       <span className="font-display text-lg tabular text-center leading-none">
-        {round(fromKg(Number(set.weight), unit), 1)}
+        {bodyweight && Number(set.weight) <= 0
+          ? <span className="text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-semibold">PDC</span>
+          : `${bodyweight ? '+' : ''}${round(fromKg(Number(set.weight), unit), 1)}`}
       </span>
       <div className="flex items-center justify-end">
         <button

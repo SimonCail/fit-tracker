@@ -35,13 +35,15 @@ export function ExerciseHistoryPage() {
 
   const normKey = params.get('key') || slug || ''
 
-  const { displayName, allSets, byDate, record, volumeTotal } = useMemo(() => {
+  const { displayName, allSets, byDate, record, volumeTotal, bodyweight } = useMemo(() => {
     const sets: HistorySet[] = []
     const nameCounts = new Map<string, number>()
+    let bodyweight = false
     for (const s of sessions) {
       for (const ex of s.exercises) {
         if (normalizeExerciseName(ex.name) !== normKey) continue
         nameCounts.set(ex.name, (nameCounts.get(ex.name) ?? 0) + 1)
+        if (ex.bodyweight) bodyweight = true
         for (const set of ex.sets) {
           sets.push({ ...set, sessionId: s.id, date: s.date })
         }
@@ -65,7 +67,7 @@ export function ExerciseHistoryPage() {
     const byDate = [...byDateMap.values()].sort((a, b) => a.date.localeCompare(b.date))
     const record = sets.reduce((m, s) => Math.max(m, Number(s.weight)), 0)
     const volumeTotal = sets.reduce((v, s) => v + s.reps * Number(s.weight), 0)
-    return { displayName, allSets: sets, byDate, record, volumeTotal }
+    return { displayName, allSets: sets, byDate, record, volumeTotal, bodyweight }
   }, [sessions, normKey])
 
   const chartData = useMemo(() => {
@@ -119,14 +121,30 @@ export function ExerciseHistoryPage() {
         </Button>
         <div className="flex-1 min-w-0">
           <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium">Exercice</p>
-          <h1 className="font-display text-2xl tracking-tight truncate">{displayName}</h1>
+          <div className="flex items-center gap-2 min-w-0">
+            <h1 className="font-display text-2xl tracking-tight truncate">{displayName}</h1>
+            {bodyweight && (
+              <span className="inline-flex items-center text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-semibold border border-[color:var(--color-border)] px-1.5 py-0.5 rounded-full shrink-0">
+                PDC
+              </span>
+            )}
+          </div>
         </div>
       </header>
 
       <div className="grid grid-cols-3 gap-2 mb-5">
-        <StatCell label="Record" value={round(fromKg(record, unit), 1).toString()} suffix={unit} icon={<TrendingUp size={12} />} />
+        <StatCell
+          label={bodyweight ? 'Lest max' : 'Record'}
+          value={record > 0 ? round(fromKg(record, unit), 1).toString() : (bodyweight ? '—' : '0')}
+          suffix={record > 0 ? unit : undefined}
+          icon={<TrendingUp size={12} />}
+        />
         <StatCell label="Séries" value={String(allSets.length)} />
-        <StatCell label="Volume" value={formatBigNum(fromKg(volumeTotal, unit))} suffix={unit} icon={<Flame size={12} />} />
+        {bodyweight ? (
+          <StatCell label="Reps total" value={String(allSets.reduce((n, s) => n + s.reps, 0))} icon={<Flame size={12} />} />
+        ) : (
+          <StatCell label="Volume" value={formatBigNum(fromKg(volumeTotal, unit))} suffix={unit} icon={<Flame size={12} />} />
+        )}
       </div>
 
       {chartData.length >= 2 && (
@@ -176,7 +194,14 @@ export function ExerciseHistoryPage() {
                   <span className="text-[10px] font-mono tabular text-[color:var(--color-text-dim)] text-center">{String(i + 1).padStart(2, '0')}</span>
                   <span className="font-display tabular text-center">{s.reps}</span>
                   <span className="font-display tabular text-center">
-                    {round(fromKg(Number(s.weight), unit), 1)}<span className="text-[10px] text-[color:var(--color-text-dim)] ml-1">{unit}</span>
+                    {bodyweight && Number(s.weight) <= 0 ? (
+                      <span className="text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-semibold">PDC</span>
+                    ) : (
+                      <>
+                        {bodyweight ? '+' : ''}{round(fromKg(Number(s.weight), unit), 1)}
+                        <span className="text-[10px] text-[color:var(--color-text-dim)] ml-1">{unit}</span>
+                      </>
+                    )}
                   </span>
                 </div>
               ))}

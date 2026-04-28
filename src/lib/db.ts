@@ -16,6 +16,7 @@ import {
 } from 'firebase/firestore'
 import { auth, db } from './firebase'
 import type { Exercise, ExerciseSet, Session, SessionType, WeighIn, WeighSlot } from './types'
+import { isBodyweightExerciseName } from './exerciseName'
 
 function uid(): string {
   const u = auth.currentUser
@@ -137,6 +138,7 @@ export async function duplicateSession(fromId: string, toDate: string): Promise<
     id: uuid(),
     name: ex.name,
     sets: [],
+    ...(ex.bodyweight ? { bodyweight: true } : {}),
   }))
   // Look for an empty strength session on toDate we can reuse.
   const q = query(sessionsCol(), where('date', '==', toDate), limit(10))
@@ -172,8 +174,15 @@ async function mutateExercises(sessionId: string, fn: (exercises: Exercise[]) =>
 
 export async function addExercise(sessionId: string, name: string): Promise<Exercise> {
   const newEx: Exercise = { id: uuid(), name, sets: [] }
+  if (isBodyweightExerciseName(name)) newEx.bodyweight = true
   await mutateExercises(sessionId, prev => [...prev, newEx])
   return newEx
+}
+
+export async function setExerciseBodyweight(sessionId: string, exerciseId: string, bodyweight: boolean) {
+  await mutateExercises(sessionId, prev =>
+    prev.map(e => (e.id === exerciseId ? { ...e, bodyweight } : e)),
+  )
 }
 
 export async function renameExercise(sessionId: string, exerciseId: string, name: string) {
@@ -303,6 +312,41 @@ export async function renameExerciseEverywhere(
 }
 
 /**
+ * Flip the bodyweight flag on every Exercise across every session whose normalized name
+ * matches `keyNormalized`. When enabling and `subtractBodyweightKg > 0`, also subtract that
+ * value from every set.weight so existing data (typed as full kg including BW) becomes "lest".
+ */
+export async function setExerciseBodyweightEverywhere(
+  keyNormalized: string,
+  bodyweight: boolean,
+  subtractBodyweightKg: number,
+  normalize: (n: string) => string,
+): Promise<number> {
+  const all = await listSessions(500)
+  let touched = 0
+  for (const session of all) {
+    let changed = false
+    const nextEx = session.exercises.map(ex => {
+      if (normalize(ex.name) !== keyNormalized) return ex
+      changed = true
+      let nextSets = ex.sets
+      if (bodyweight && subtractBodyweightKg > 0) {
+        nextSets = ex.sets.map(s => ({
+          ...s,
+          weight: Math.max(0, Number(s.weight) - subtractBodyweightKg),
+        }))
+      }
+      return { ...ex, bodyweight, sets: nextSets }
+    })
+    if (changed) {
+      await updateDoc(sessionRef(session.id), { exercises: nextEx })
+      touched++
+    }
+  }
+  return touched
+}
+
+/**
  * Aggregated view: every distinct exercise (by normalized key) with its display name,
  * total set count and total volume. Used by the exercise management + history pages.
  */
@@ -314,6 +358,7 @@ export type ExerciseAggregate = {
   bestWeightKg: number
   lastUsedIso: string
   variantNames: string[] // all raw spellings seen
+  bodyweight: boolean // true if any occurrence of this exercise is flagged bodyweight
 }
 
 export async function getExerciseAggregates(
@@ -327,6 +372,7 @@ export async function getExerciseAggregates(
     bestWeightKg: number
     lastUsedIso: string
     variantNames: Set<string>
+    bodyweight: boolean
   }>()
   for (const s of sessions) {
     for (const ex of s.exercises) {
@@ -340,10 +386,12 @@ export async function getExerciseAggregates(
         bestWeightKg: 0,
         lastUsedIso: '',
         variantNames: new Set<string>(),
+        bodyweight: false,
       }
       entry.displayCounts.set(name, (entry.displayCounts.get(name) ?? 0) + 1)
       entry.variantNames.add(name)
       entry.totalSets += ex.sets.length
+      if (ex.bodyweight) entry.bodyweight = true
       for (const set of ex.sets) {
         entry.totalVolumeKg += set.reps * Number(set.weight)
         if (Number(set.weight) > entry.bestWeightKg) entry.bestWeightKg = Number(set.weight)
@@ -368,6 +416,7 @@ export async function getExerciseAggregates(
       bestWeightKg: v.bestWeightKg,
       lastUsedIso: v.lastUsedIso,
       variantNames: [...v.variantNames],
+      bodyweight: v.bodyweight,
     })
   }
   out.sort((a, b) => b.totalSets - a.totalSets)
