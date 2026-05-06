@@ -2,6 +2,7 @@ import { useState } from 'react'
 import {
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
 } from 'firebase/auth'
@@ -19,6 +20,7 @@ export function Login() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
 
   async function onGoogle() {
     setError(null)
@@ -35,10 +37,29 @@ export function Login() {
   async function onEmailPassword(e: React.FormEvent, create = false) {
     e.preventDefault()
     setError(null)
+    setInfo(null)
     setLoading(true)
     try {
       if (create) await createUserWithEmailAndPassword(auth, email, password)
       else await signInWithEmailAndPassword(auth, email, password)
+    } catch (e) {
+      setError(humanAuthError(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function onResetPassword() {
+    setError(null)
+    setInfo(null)
+    if (!email) {
+      setError('Tape ton email d\'abord, puis clique sur "Mot de passe oublié".')
+      return
+    }
+    setLoading(true)
+    try {
+      await sendPasswordResetEmail(auth, email)
+      setInfo(`Email envoyé à ${email}. Clique le lien pour définir un mot de passe — tes données restent intactes.`)
     } catch (e) {
       setError(humanAuthError(e))
     } finally {
@@ -141,6 +162,16 @@ export function Login() {
           </motion.div>
         )}
 
+        {info && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-2xl p-2.5 mb-3 bg-[color:var(--color-accent-soft)] border border-[color:var(--color-accent)]/30 text-xs shrink-0"
+          >
+            <p className="text-[color:var(--color-accent)] break-words">{info}</p>
+          </motion.div>
+        )}
+
         {/* Auth CTAs */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
@@ -208,6 +239,14 @@ export function Login() {
                   Créer
                 </Button>
               </div>
+              <button
+                type="button"
+                onClick={onResetPassword}
+                disabled={loading}
+                className="w-full text-xs text-[color:var(--color-text-dim)] hover:text-[color:var(--color-accent)] transition-colors py-1 cursor-pointer disabled:opacity-50"
+              >
+                Mot de passe oublié — recevoir un lien
+              </button>
               <Button type="button" variant="ghost" onClick={() => setMode('choose')} className="w-full">
                 ← Retour
               </Button>
