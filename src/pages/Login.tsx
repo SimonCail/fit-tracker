@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
+  getRedirectResult,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
 } from 'firebase/auth'
 import { ArrowRight, CalendarDays, Flame, Lock, Mail, Scale, Timer, Zap } from 'lucide-react'
 import { motion } from 'framer-motion'
@@ -20,13 +22,38 @@ export function Login() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // If we returned from a redirect-based Google sign-in, surface any error so the user isn't stuck silently.
+  useEffect(() => {
+    getRedirectResult(auth).catch(e => setError(humanAuthError(e)))
+  }, [])
+
   async function onGoogle() {
     setError(null)
     setLoading(true)
+    const provider = new GoogleAuthProvider()
     try {
-      await signInWithPopup(auth, new GoogleAuthProvider())
+      await signInWithPopup(auth, provider)
     } catch (e) {
-      setError((e as Error).message)
+      const code = (e as { code?: string }).code
+      // Browsers (notably Chrome with strict tracking protection, Safari, Brave) often block the
+      // popup or kill the cross-origin handshake. Fall back to a full-page redirect, which works
+      // in every browser without third-party cookies.
+      if (
+        code === 'auth/popup-blocked' ||
+        code === 'auth/popup-closed-by-user' ||
+        code === 'auth/cancelled-popup-request' ||
+        code === 'auth/web-storage-unsupported' ||
+        code === 'auth/operation-not-supported-in-this-environment'
+      ) {
+        try {
+          await signInWithRedirect(auth, provider)
+          return
+        } catch (e2) {
+          setError(humanAuthError(e2))
+        }
+      } else {
+        setError(humanAuthError(e))
+      }
     } finally {
       setLoading(false)
     }
@@ -40,7 +67,7 @@ export function Login() {
       if (create) await createUserWithEmailAndPassword(auth, email, password)
       else await signInWithEmailAndPassword(auth, email, password)
     } catch (e) {
-      setError((e as Error).message)
+      setError(humanAuthError(e))
     } finally {
       setLoading(false)
     }
@@ -226,6 +253,34 @@ export function Login() {
       </div>
     </div>
   )
+}
+
+/**
+ * Map Firebase auth error codes to readable French messages. Falls back to the raw message
+ * so debugging info isn't lost.
+ */
+function humanAuthError(e: unknown): string {
+  const code = (e as { code?: string })?.code
+  switch (code) {
+    case 'auth/invalid-email': return 'Adresse e-mail invalide.'
+    case 'auth/missing-password': return 'Mot de passe manquant.'
+    case 'auth/weak-password': return 'Mot de passe trop court (6 caractères minimum).'
+    case 'auth/email-already-in-use': return 'Un compte existe déjà avec cet e-mail.'
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential':
+      return 'E-mail ou mot de passe incorrect.'
+    case 'auth/user-not-found': return 'Aucun compte avec cet e-mail.'
+    case 'auth/too-many-requests': return 'Trop de tentatives. Réessaie dans quelques minutes.'
+    case 'auth/network-request-failed': return 'Pas de connexion réseau.'
+    case 'auth/unauthorized-domain': return 'Ce domaine n\'est pas autorisé dans Firebase Auth.'
+    case 'auth/popup-blocked': return 'Popup bloquée par le navigateur — bascule vers redirection…'
+    case 'auth/popup-closed-by-user': return 'Connexion annulée.'
+    case 'auth/cancelled-popup-request': return 'Plusieurs popups ouvertes. Réessaie.'
+    case 'auth/web-storage-unsupported': return 'Stockage local désactivé. Active les cookies.'
+    case 'auth/operation-not-supported-in-this-environment': return 'Connexion non supportée ici. Essaie un autre navigateur.'
+    default:
+      return (e as Error)?.message ?? 'Erreur inconnue.'
+  }
 }
 
 function FeatureCard({
