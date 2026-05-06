@@ -1,11 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
-  getRedirectResult,
   signInWithEmailAndPassword,
   signInWithPopup,
-  signInWithRedirect,
 } from 'firebase/auth'
 import { ArrowRight, CalendarDays, Flame, Lock, Mail, Scale, Timer, Zap } from 'lucide-react'
 import { motion } from 'framer-motion'
@@ -22,38 +20,13 @@ export function Login() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // If we returned from a redirect-based Google sign-in, surface any error so the user isn't stuck silently.
-  useEffect(() => {
-    getRedirectResult(auth).catch(e => setError(humanAuthError(e)))
-  }, [])
-
   async function onGoogle() {
     setError(null)
     setLoading(true)
-    const provider = new GoogleAuthProvider()
     try {
-      await signInWithPopup(auth, provider)
+      await signInWithPopup(auth, new GoogleAuthProvider())
     } catch (e) {
-      const code = (e as { code?: string }).code
-      // Browsers (notably Chrome with strict tracking protection, Safari, Brave) often block the
-      // popup or kill the cross-origin handshake. Fall back to a full-page redirect, which works
-      // in every browser without third-party cookies.
-      if (
-        code === 'auth/popup-blocked' ||
-        code === 'auth/popup-closed-by-user' ||
-        code === 'auth/cancelled-popup-request' ||
-        code === 'auth/web-storage-unsupported' ||
-        code === 'auth/operation-not-supported-in-this-environment'
-      ) {
-        try {
-          await signInWithRedirect(auth, provider)
-          return
-        } catch (e2) {
-          setError(humanAuthError(e2))
-        }
-      } else {
-        setError(humanAuthError(e))
-      }
+      setError(humanAuthError(e))
     } finally {
       setLoading(false)
     }
@@ -273,11 +246,11 @@ function humanAuthError(e: unknown): string {
     case 'auth/too-many-requests': return 'Trop de tentatives. Réessaie dans quelques minutes.'
     case 'auth/network-request-failed': return 'Pas de connexion réseau.'
     case 'auth/unauthorized-domain': return 'Ce domaine n\'est pas autorisé dans Firebase Auth.'
-    case 'auth/popup-blocked': return 'Popup bloquée par le navigateur — bascule vers redirection…'
+    case 'auth/popup-blocked': return 'Popup bloquée par le navigateur. Autorise les popups pour ce site, ou utilise email/mot de passe ci-dessous.'
     case 'auth/popup-closed-by-user': return 'Connexion annulée.'
     case 'auth/cancelled-popup-request': return 'Plusieurs popups ouvertes. Réessaie.'
-    case 'auth/web-storage-unsupported': return 'Stockage local désactivé. Active les cookies.'
-    case 'auth/operation-not-supported-in-this-environment': return 'Connexion non supportée ici. Essaie un autre navigateur.'
+    case 'auth/web-storage-unsupported': return 'Stockage local désactivé. Active les cookies, ou utilise email/mot de passe.'
+    case 'auth/operation-not-supported-in-this-environment': return 'Connexion non supportée ici. Utilise email/mot de passe.'
     default:
       return (e as Error)?.message ?? 'Erreur inconnue.'
   }
