@@ -28,7 +28,7 @@ import {
   setWeighIn,
 } from '../lib/db'
 import type { Session, SessionType, WeighIn, WeighSlot } from '../lib/types'
-import { formatWeight, fromKg, round, toKg } from '../lib/units'
+import { formatWeight, fromKg, parseDecimal, round, toKg } from '../lib/units'
 import { dateToDayKey, useSettings } from '../store/settings'
 import { maybeFireReminder } from '../lib/notifications'
 import { MonthlyCalendar } from '../components/MonthlyCalendar'
@@ -437,8 +437,8 @@ function WeightSlotRow({
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
-    const n = Number(value)
-    if (!value || Number.isNaN(n) || n <= 0) return
+    const n = parseDecimal(value)
+    if (Number.isNaN(n) || n <= 0) return
     // Clamp to a sane body-weight range to avoid absurd entries.
     const kg = toKg(n, unit)
     if (kg < 20 || kg > 400) return
@@ -472,14 +472,13 @@ function WeightSlotRow({
             {label}
           </span>
           <Input
-            type="number"
-            step="0.1"
-            min="20"
-            max="400"
+            type="text"
             value={value}
             onChange={e => setValue(e.target.value)}
             autoFocus
             inputMode="decimal"
+            pattern="[0-9]*[.,]?[0-9]*"
+            autoComplete="off"
             placeholder="0.0"
             className="h-11 pl-[3.75rem] pr-10 text-lg font-semibold tabular min-w-0"
           />
@@ -784,8 +783,8 @@ function WeighInAntedateModal({
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
-    const n = Number(value)
-    if (!value || Number.isNaN(n) || n <= 0) return
+    const n = parseDecimal(value)
+    if (Number.isNaN(n) || n <= 0) return
     const kg = toKg(n, unit)
     if (kg < 20 || kg > 400) return
     setSaving(true)
@@ -841,14 +840,13 @@ function WeighInAntedateModal({
             <Label className="block mb-2">Poids</Label>
             <div className="relative">
               <Input
-                type="number"
-                step="0.1"
-                min="20"
-                max="400"
+                type="text"
                 value={value}
                 onChange={e => setValue(e.target.value)}
                 placeholder="0.0"
                 inputMode="decimal"
+                pattern="[0-9]*[.,]?[0-9]*"
+                autoComplete="off"
                 className="h-11 pr-12 text-lg font-semibold tabular"
                 autoFocus
               />

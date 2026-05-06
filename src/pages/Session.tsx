@@ -19,7 +19,7 @@ import {
   updateSet,
 } from '../lib/db'
 import type { Exercise, ExerciseSet, Session } from '../lib/types'
-import { formatWeight, fromKg, round, toKg } from '../lib/units'
+import { formatWeight, fromKg, parseDecimal, round, toKg } from '../lib/units'
 import { normalizeExerciseName, slugifyExerciseName } from '../lib/exerciseName'
 import { useSettings } from '../store/settings'
 import { RestTimer } from '../components/RestTimer'
@@ -254,8 +254,10 @@ function ExerciseCard({
     e.preventDefault()
     if (!reps || adding) return
     if (!isBw && !weight) return
+    const parsed = weight ? parseDecimal(weight) : 0
+    if (Number.isNaN(parsed) || parsed < 0) return
     setAdding(true)
-    const weightKg = weight ? toKg(Number(weight), unit) : 0
+    const weightKg = toKg(parsed, unit)
     try {
       await addSet(sessionId, exercise.id, Number(reps), weightKg)
       setReps('')
@@ -381,12 +383,12 @@ function ExerciseCard({
         <div className="relative">
           <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium pointer-events-none">{isBw ? `lest ${unit}` : unit}</span>
           <Input
-            type="number"
-            step="0.5"
+            type="text"
             value={weight}
             onChange={e => setWeight(e.target.value)}
-            min="0"
             inputMode="decimal"
+            pattern="[0-9]*[.,]?[0-9]*"
+            autoComplete="off"
             className={`h-11 text-right font-display text-lg tabular ${isBw ? 'pr-[5.5rem]' : 'pr-10'}`}
             placeholder={isBw ? '0' : '0.0'}
           />
@@ -457,7 +459,9 @@ function SetRow({
   const [weight, setWeight] = useState(String(round(fromKg(Number(set.weight), unit), 1)))
 
   async function save() {
-    await updateSet(sessionId, exerciseId, set.id, { reps: Number(reps), weight: toKg(Number(weight), unit) })
+    const parsed = parseDecimal(weight)
+    if (Number.isNaN(parsed) || parsed < 0) return
+    await updateSet(sessionId, exerciseId, set.id, { reps: Number(reps), weight: toKg(parsed, unit) })
     setEditing(false)
     onChange()
   }
@@ -480,12 +484,13 @@ function SetRow({
           autoFocus
         />
         <Input
-          type="number"
-          step="0.5"
+          type="text"
           value={weight}
           onChange={e => setWeight(e.target.value)}
           className="h-9 text-center font-display text-base tabular px-2"
           inputMode="decimal"
+          pattern="[0-9]*[.,]?[0-9]*"
+          autoComplete="off"
         />
         <div className="flex items-center justify-end gap-1">
           <button
@@ -588,7 +593,7 @@ function RunningSessionView({ session, onChange }: { session: Session; onChange:
   const [saving, setSaving] = useState(false)
   const saveTimer = useRef<number | null>(null)
 
-  const distanceMeters = Number(distanceKm) > 0 ? Math.round(Number(distanceKm) * 1000) : null
+  const distanceMeters = parseDecimal(distanceKm) > 0 ? Math.round(parseDecimal(distanceKm) * 1000) : null
   const durationSeconds = (() => {
     const m = Number(durationMin) || 0
     const s = Number(durationSec) || 0
@@ -636,7 +641,7 @@ function RunningSessionView({ session, onChange }: { session: Session; onChange:
         <div className="space-y-3">
           <div>
             <Label className="block mb-1.5">Distance (km)</Label>
-            <Input type="number" step="0.01" min="0" value={distanceKm} onChange={e => setDistanceKm(e.target.value)} inputMode="decimal" />
+            <Input type="text" value={distanceKm} onChange={e => setDistanceKm(e.target.value)} inputMode="decimal" pattern="[0-9]*[.,]?[0-9]*" autoComplete="off" />
           </div>
           <div>
             <Label className="block mb-1.5">Durée</Label>

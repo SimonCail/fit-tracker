@@ -25,3 +25,15 @@ export function estimate1RM(weightKg: number, reps: number): number {
   if (reps <= 1) return weightKg
   return weightKg * 36 / (37 - reps)
 }
+
+/**
+ * Parse a user-typed decimal string. Accepts both "75.5" (en) and "75,5" (fr) — iOS's
+ * inputMode="decimal" keyboard shows comma in some locales, and <input type="number">
+ * rejects comma silently. Returns NaN for empty / invalid input (Number('') => 0, so we
+ * normalize to NaN for clarity).
+ */
+export function parseDecimal(input: string): number {
+  const s = input.replace(',', '.').trim()
+  if (!s) return NaN
+  return Number(s)
+}
