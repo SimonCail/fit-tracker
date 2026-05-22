@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Check, Footprints, Plus, Timer, Trash2, Trophy } from 'lucide-react'
+import { ArrowLeft, Check, ChevronRight, Footprints, History, Plus, Timer, Trash2, Trophy } from 'lucide-react'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Button, Card, EmptyState, Input, Label, Spinner, Tooltip, TooltipContent, TooltipTrigger, useConfirm } from '../components/ui'
+import { Button, Card, EmptyState, Input, Label, Sheet, SheetBody, SheetContent, SheetHeader, Spinner, Tooltip, TooltipContent, TooltipTrigger, useConfirm } from '../components/ui'
 import {
   addExercise,
   addSet,
@@ -21,6 +21,8 @@ import {
 import type { Exercise, ExerciseSet, Session } from '../lib/types'
 import { formatWeight, fromKg, parseDecimal, round, toKg } from '../lib/units'
 import { normalizeExerciseName, slugifyExerciseName } from '../lib/exerciseName'
+import { buildPreviousPerformances, findLastSimilarSession } from '../lib/similarSession'
+import type { PreviousPerformance } from '../lib/similarSession'
 import { useSettings } from '../store/settings'
 import { RestTimer } from '../components/RestTimer'
 
@@ -35,6 +37,8 @@ export function SessionPage() {
   const [exerciseNames, setExerciseNames] = useState<string[]>([])
   const [pastPR, setPastPR] = useState<Record<string, number>>({}) // exercise name -> best kg before THIS session
   const [timerOpen, setTimerOpen] = useState(false)
+  const [recapOpen, setRecapOpen] = useState(false)
+  const [allSessions, setAllSessions] = useState<Session[]>([])
   const [prToast, setPrToast] = useState<{ name: string; weight: number; bodyweight: boolean } | null>(null)
   const notesTimer = useRef<number | null>(null)
 
@@ -58,6 +62,7 @@ export function SessionPage() {
       setData(d)
       setNotes(d?.notes ?? '')
       setExerciseNames(names)
+      setAllSessions(all)
       const prs: Record<string, number> = {}
       for (const sess of all) {
         if (sess.id === id) continue
@@ -72,6 +77,18 @@ export function SessionPage() {
       setLoading(false)
     })()
   }, [id])
+
+  // The most recent past session sharing exercises with this one — used as a
+  // "same type" reference (e.g. last pecs session) without relying on its title.
+  const lastSimilar = useMemo(
+    () => (data ? findLastSimilarSession(data, allSessions) : null),
+    [data, allSessions],
+  )
+  // Per-exercise: what was logged the last time each exercise was done.
+  const prevPerf = useMemo<Map<string, PreviousPerformance>>(
+    () => (data ? buildPreviousPerformances(data, allSessions) : new Map()),
+    [data, allSessions],
+  )
 
   function onNotesChange(v: string) {
     setNotes(v)
@@ -167,6 +184,27 @@ export function SessionPage() {
         <RunningSessionView session={data} onChange={load} />
       ) : (
         <>
+          {lastSimilar && (
+            <button
+              type="button"
+              onClick={() => setRecapOpen(true)}
+              className="w-full mb-6 flex items-center gap-3 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-4 py-3 text-left hover:border-[color:var(--color-border-strong)] hover:bg-[color:var(--color-surface-2)]/60 transition-colors cursor-pointer group"
+            >
+              <span className="w-9 h-9 rounded-xl bg-[color:var(--color-accent-soft)] text-[color:var(--color-accent)] flex items-center justify-center shrink-0">
+                <History size={16} />
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="block text-sm font-medium">Dernière séance similaire</span>
+                <span className="block text-xs text-[color:var(--color-text-dim)] truncate capitalize">
+                  {format(new Date(lastSimilar.session.date), 'd MMM', { locale: fr })}
+                  {' · '}
+                  {lastSimilar.overlap} exo{lastSimilar.overlap > 1 ? 's' : ''} en commun
+                </span>
+              </span>
+              <ChevronRight size={16} className="text-[color:var(--color-text-dim)] group-hover:translate-x-0.5 transition-transform shrink-0" />
+            </button>
+          )}
+
           <div className="space-y-4">
             {data.exercises.map((ex, i) => (
               <ExerciseCard
@@ -176,6 +214,7 @@ export function SessionPage() {
                 exercise={ex}
                 unit={unit}
                 previousPR={pastPR[ex.name.trim()] ?? 0}
+                previous={prevPerf.get(normalizeExerciseName(ex.name))}
                 onChange={load}
                 onSetAdded={onSetAdded}
               />
@@ -188,6 +227,45 @@ export function SessionPage() {
 
       <RestTimer open={timerOpen} onClose={() => setTimerOpen(false)} defaultSeconds={restSeconds} />
 
+      {lastSimilar && (
+        <Sheet open={recapOpen} onOpenChange={setRecapOpen}>
+          <SheetContent side="bottom" className="max-h-[85dvh]">
+            <SheetHeader>
+              <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium">
+                Dernière séance similaire
+              </p>
+              <h3 className="font-display text-2xl mt-1 capitalize">
+                {format(new Date(lastSimilar.session.date), 'EEEE d MMMM', { locale: fr })}
+              </h3>
+              {lastSimilar.session.notes && (
+                <p className="text-sm text-[color:var(--color-text-dim)] mt-0.5 truncate">
+                  {lastSimilar.session.notes}
+                </p>
+              )}
+            </SheetHeader>
+            <SheetBody className="pb-[calc(env(safe-area-inset-bottom,0px)+1.5rem)]">
+              <div className="space-y-5">
+                {lastSimilar.session.exercises.map(ex => (
+                  <RecapExercise
+                    key={ex.id}
+                    exercise={ex}
+                    unit={unit}
+                    shared={lastSimilar.sharedKeys.has(normalizeExerciseName(ex.name))}
+                  />
+                ))}
+              </div>
+              <Button
+                variant="secondary"
+                className="w-full mt-6"
+                onClick={() => nav(`/session/${lastSimilar.session.id}`)}
+              >
+                Ouvrir la séance complète
+              </Button>
+            </SheetBody>
+          </SheetContent>
+        </Sheet>
+      )}
+
       <AnimatePresence>
         {prToast && (
           <motion.div
@@ -196,7 +274,7 @@ export function SessionPage() {
             exit={{ y: -60, opacity: 0 }}
             className="fixed top-4 left-0 right-0 z-50 pointer-events-none flex justify-center safe-top"
           >
-            <div className="pointer-events-auto rounded-full bg-[color:var(--color-accent)] text-white px-5 py-2.5 flex items-center gap-2 shadow-2xl">
+            <div className="pointer-events-auto rounded-full bg-[color:var(--color-accent-fill)] text-[color:var(--color-accent-text)] px-5 py-2.5 flex items-center gap-2 shadow-2xl">
               <Trophy size={16} />
               <span className="text-sm font-medium">
                 Nouveau PR sur {prToast.name} — {prToast.bodyweight ? `lest +${round(fromKg(prToast.weight, unit), 1)} ${unit}` : formatWeight(prToast.weight, unit, 1)}
@@ -215,6 +293,7 @@ function ExerciseCard({
   exercise,
   unit,
   previousPR,
+  previous,
   onChange,
   onSetAdded,
 }: {
@@ -223,6 +302,7 @@ function ExerciseCard({
   exercise: Exercise
   unit: 'kg' | 'lb'
   previousPR: number
+  previous?: PreviousPerformance
   onChange: () => void
   onSetAdded: (name: string, weightKg: number, bodyweight: boolean) => void
 }) {
@@ -322,6 +402,27 @@ function ExerciseCard({
         {exercise.name}
         <span className="text-xs text-[color:var(--color-text-dim)] opacity-0 group-hover:opacity-100 transition-opacity">↗</span>
       </button>
+
+      {previous && previous.sets.length > 0 && (
+        <div className="mt-2.5 rounded-xl bg-[color:var(--color-surface-2)]/50 border border-[color:var(--color-border)] px-3 py-2">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium">
+              Dernière fois
+            </span>
+            <span className="text-[10px] text-[color:var(--color-text-dim)] tabular capitalize">
+              {format(new Date(previous.date), 'd MMM', { locale: fr })}
+            </span>
+          </div>
+          <div className="mt-1 font-display tabular text-sm leading-snug">
+            {previous.sets.map((s, i) => (
+              <span key={s.id}>
+                {i > 0 && <span className="text-[color:var(--color-text-dim)]/50"> · </span>}
+                {compactSet(Number(s.weight), s.reps, unit, previous.bodyweight)}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {bestPreview && (
         <div className="grid grid-cols-3 gap-2 mt-3 mb-4 text-xs">
@@ -425,6 +526,57 @@ function formatLoadDisplay(weightKg: number, unit: 'kg' | 'lb', bodyweight: bool
   return formatWeight(weightKg, unit, 1)
 }
 
+/** Compact "reps×weight" for a set — unit-less, with "+" / "PDC" for bodyweight mode. */
+function compactSet(weightKg: number, reps: number, unit: 'kg' | 'lb', bodyweight: boolean): string {
+  if (bodyweight && weightKg <= 0) return `${reps}×PDC`
+  return `${reps}×${bodyweight ? '+' : ''}${round(fromKg(weightKg, unit), 1)}`
+}
+
+/** Read-only exercise row shown in the "last similar session" recap sheet. */
+function RecapExercise({
+  exercise,
+  unit,
+  shared,
+}: {
+  exercise: Exercise
+  unit: 'kg' | 'lb'
+  shared: boolean
+}) {
+  const isBw = !!exercise.bodyweight
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+        <h4 className="font-display text-lg leading-tight">{exercise.name}</h4>
+        {shared && (
+          <span className="text-[9px] uppercase tracking-widest text-[color:var(--color-accent)] font-semibold border border-[color:var(--color-accent)]/30 bg-[color:var(--color-accent-soft)] px-1.5 py-0.5 rounded-full">
+            en commun
+          </span>
+        )}
+        {isBw && (
+          <span className="text-[9px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-semibold border border-[color:var(--color-border)] px-1.5 py-0.5 rounded-full">
+            PDC
+          </span>
+        )}
+      </div>
+      {exercise.sets.length === 0 ? (
+        <p className="text-xs text-[color:var(--color-text-dim)]">Aucune série loggée</p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {exercise.sets.map((s, i) => (
+            <span
+              key={s.id}
+              className="inline-flex items-baseline gap-1.5 rounded-lg bg-[color:var(--color-surface-2)] border border-[color:var(--color-border)] px-2 py-1"
+            >
+              <span className="text-[9px] font-mono tabular text-[color:var(--color-text-dim)]">{String(i + 1).padStart(2, '0')}</span>
+              <span className="font-display tabular text-sm">{compactSet(Number(s.weight), s.reps, unit, isBw)}</span>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function MiniStat({ label, value, suffix }: { label: string; value: string; suffix?: string }) {
   return (
     <div className="rounded-xl bg-[color:var(--color-surface-2)]/60 border border-[color:var(--color-border)] px-3 py-2">
@@ -496,7 +648,7 @@ function SetRow({
           <button
             type="button"
             onClick={save}
-            className="p-1.5 rounded-full bg-[color:var(--color-accent)] text-[color:var(--color-accent-text)] hover:bg-[color:var(--color-accent-hover)] transition-colors cursor-pointer"
+            className="p-1.5 rounded-full bg-[color:var(--color-accent-fill)] text-[color:var(--color-accent-text)] hover:bg-[color:var(--color-accent-fill-hover)] transition-colors cursor-pointer"
             aria-label="Enregistrer"
           >
             <Check size={12} />

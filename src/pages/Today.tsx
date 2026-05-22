@@ -300,7 +300,7 @@ function SessionAction({
     <div className="relative group h-full">
       <button
         onClick={onToday}
-        className="h-full w-full flex flex-col text-left rounded-2xl p-5 bg-[color:var(--color-accent)] text-[color:var(--color-accent-text)] border border-[color:var(--color-accent)] transition-all duration-200 cursor-pointer hover:-translate-y-0.5 hover:bg-[color:var(--color-accent-hover)] hover:shadow-[0_16px_40px_-12px_color-mix(in_srgb,var(--color-accent)_55%,transparent)] active:translate-y-0 active:scale-[0.99]"
+        className="h-full w-full flex flex-col text-left rounded-2xl p-5 bg-[color:var(--color-accent-fill)] text-[color:var(--color-accent-text)] border border-[color:var(--color-accent-fill)] transition-all duration-200 cursor-pointer hover:-translate-y-0.5 hover:bg-[color:var(--color-accent-fill-hover)] hover:shadow-[0_16px_40px_-12px_color-mix(in_srgb,var(--color-accent-fill)_55%,transparent)] active:translate-y-0 active:scale-[0.99]"
       >
         <div className="flex items-center justify-between">
           <span className="w-10 h-10 rounded-2xl bg-[color:var(--color-accent-text)]/10 flex items-center justify-center">
@@ -848,7 +848,6 @@ function WeighInAntedateModal({
                 pattern="[0-9]*[.,]?[0-9]*"
                 autoComplete="off"
                 className="h-11 pr-12 text-lg font-semibold tabular"
-                autoFocus
               />
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium pointer-events-none">
                 {unit}
@@ -893,7 +892,7 @@ function QuickDate({ label, value, current, onChange }: { label: string; value: 
       onClick={() => onChange(value)}
       className={`flex-1 h-10 rounded-xl text-sm font-medium transition-colors cursor-pointer ${
         active
-          ? 'bg-[color:var(--color-accent)] text-[color:var(--color-accent-text)]'
+          ? 'bg-[color:var(--color-accent-fill)] text-[color:var(--color-accent-text)]'
           : 'bg-[color:var(--color-surface-2)] text-[color:var(--color-text)] hover:bg-[color:var(--color-surface-2)]/70 border border-[color:var(--color-border)]'
       }`}
     >

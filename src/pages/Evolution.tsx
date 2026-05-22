@@ -269,6 +269,25 @@ function RunningSection({ sessions, cutoff }: { sessions: Session[]; cutoff: str
       })
   }, [runs])
 
+  // Y-axis for the pace chart: snap the domain to a clean grid (15s / 30s / 1min
+  // depending on the spread) so ticks read as real m:ss times, not raw decimals.
+  const paceAxis = useMemo(() => {
+    if (chartData.length === 0) return { domain: [5, 6] as [number, number], ticks: [5, 6] }
+    let lo = Infinity
+    let hi = -Infinity
+    for (const d of chartData) {
+      if (d.pace < lo) lo = d.pace
+      if (d.pace > hi) hi = d.pace
+    }
+    const span = Math.max(hi - lo, 0.01)
+    const step = [0.25, 0.5, 1, 2].find(s => span / s <= 4) ?? 2
+    const low = Math.floor(lo / step) * step
+    const high = Math.ceil(hi / step) * step
+    const ticks: number[] = []
+    for (let t = low; t <= high + 1e-9; t += step) ticks.push(Math.round(t * 1000) / 1000)
+    return { domain: [low, high] as [number, number], ticks }
+  }, [chartData])
+
   const byRoute = useMemo(() => {
     const map = new Map<string, { name: string; runs: number; totalKm: number; bestPaceSec: number | null }>()
     for (const r of runs) {
@@ -318,16 +337,21 @@ function RunningSection({ sessions, cutoff }: { sessions: Session[]; cutoff: str
                 </defs>
                 <CartesianGrid stroke="var(--color-border)" vertical={false} strokeDasharray="3 3" />
                 <XAxis dataKey="date" tickFormatter={d => format(parseISO(d), 'd MMM', { locale: fr })} stroke="var(--color-text-dim)" fontSize={11} tickMargin={8} />
-                <YAxis stroke="var(--color-text-dim)" fontSize={11} width={32} domain={['dataMin - 0.3', 'dataMax + 0.3']} reversed />
+                <YAxis
+                  stroke="var(--color-text-dim)"
+                  fontSize={11}
+                  width={40}
+                  domain={paceAxis.domain}
+                  ticks={paceAxis.ticks}
+                  tickFormatter={formatPace}
+                  reversed
+                />
                 <Tooltip
                   contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 12, fontSize: 12, fontFamily: 'var(--font-mono)' }}
                   labelFormatter={d => format(parseISO(d as string), 'd MMM yyyy', { locale: fr })}
                   formatter={(v, _n, item) => {
-                    const n = Number(v)
-                    const mm = Math.floor(n)
-                    const ss = Math.round((n - mm) * 60)
                     const km = (item.payload as { km?: number })?.km
-                    return [`${mm}:${String(ss).padStart(2, '0')} min/km${km ? ` · ${km}km` : ''}`, 'Allure']
+                    return [`${formatPace(Number(v))} min/km${km ? ` · ${km}km` : ''}`, 'Allure']
                   }}
                 />
                 <Area type="monotone" dataKey="pace" stroke="#a78bfa" strokeWidth={2.5} fill="url(#pace-grad)" dot={{ r: 3, fill: '#a78bfa' }} activeDot={{ r: 5 }} />
@@ -379,6 +403,12 @@ function RunStat({ label, value, suffix }: { label: string; value: string; suffi
       </p>
     </Card>
   )
+}
+
+/** Decimal minutes → "m:ss" pace label (e.g. 5.5 → "5:30", 5.99 → "6:00"). */
+function formatPace(decimalMinutes: number): string {
+  const totalSec = Math.round(decimalMinutes * 60)
+  return `${Math.floor(totalSec / 60)}:${String(totalSec % 60).padStart(2, '0')}`
 }
 
 function formatHMS(totalSec: number): string {

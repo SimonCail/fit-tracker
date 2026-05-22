@@ -5,7 +5,7 @@ export function Switch({ className, ...props }: SwitchPrimitive.SwitchProps) {
   return (
     <SwitchPrimitive.Root
       className={cn(
-        'peer inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-accent)] data-[state=checked]:bg-[color:var(--color-accent)] data-[state=checked]:border-[color:var(--color-accent)]',
+        'peer inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-accent)] data-[state=checked]:bg-[color:var(--color-accent-fill)] data-[state=checked]:border-[color:var(--color-accent-fill)]',
         className,
       )}
       {...props}

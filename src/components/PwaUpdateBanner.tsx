@@ -40,7 +40,7 @@ export function PwaUpdateBanner() {
           transition={{ type: 'spring', stiffness: 380, damping: 32 }}
           className="fixed left-4 right-4 sm:left-auto sm:right-4 sm:w-80 bottom-[max(7.5rem,calc(env(safe-area-inset-bottom)+5rem))] sm:bottom-6 z-50"
         >
-          <div className="rounded-2xl bg-[color:var(--color-accent)] text-[color:var(--color-accent-text)] shadow-2xl px-4 py-3 flex items-center gap-3">
+          <div className="rounded-2xl bg-[color:var(--color-accent-fill)] text-[color:var(--color-accent-text)] shadow-2xl px-4 py-3 flex items-center gap-3">
             <RefreshCw size={16} className="shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold leading-tight">Nouvelle version dispo</p>

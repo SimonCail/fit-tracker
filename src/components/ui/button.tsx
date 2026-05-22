@@ -9,9 +9,9 @@ const button = cva(
     variants: {
       variant: {
         primary:
-          'bg-[color:var(--color-text)] text-[color:var(--color-bg)] hover:bg-[color:var(--color-accent)] hover:text-[color:var(--color-accent-text)]',
+          'bg-[color:var(--color-text)] text-[color:var(--color-bg)] hover:bg-[color:var(--color-accent-fill)] hover:text-[color:var(--color-accent-text)]',
         accent:
-          'bg-[color:var(--color-accent)] text-[color:var(--color-accent-text)] hover:bg-[color:var(--color-accent-hover)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--color-accent)_40%,transparent),0_8px_24px_-8px_color-mix(in_srgb,var(--color-accent)_30%,transparent)]',
+          'bg-[color:var(--color-accent-fill)] text-[color:var(--color-accent-text)] hover:bg-[color:var(--color-accent-fill-hover)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--color-accent-fill)_40%,transparent),0_8px_24px_-8px_color-mix(in_srgb,var(--color-accent-fill)_30%,transparent)]',
         secondary:
           'bg-[color:var(--color-surface)] text-[color:var(--color-text)] border border-[color:var(--color-border)] hover:border-[color:var(--color-border-strong)]',
         ghost:
