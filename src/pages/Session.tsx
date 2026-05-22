@@ -53,6 +53,7 @@ export function SessionPage() {
   // Initial load + build "past PR" map from all sessions except this one.
   useEffect(() => {
     if (!id) return
+    setRecapOpen(false)
     ;(async () => {
       const [d, all, names] = await Promise.all([
         getSession(id),
@@ -257,7 +258,7 @@ export function SessionPage() {
               <Button
                 variant="secondary"
                 className="w-full mt-6"
-                onClick={() => nav(`/session/${lastSimilar.session.id}`)}
+                onClick={() => { setRecapOpen(false); nav(`/session/${lastSimilar.session.id}`) }}
               >
                 Ouvrir la séance complète
               </Button>
