@@ -8,6 +8,7 @@ import { Card, EmptyState, Input, Label, Skeleton, Badge, useConfirm, Tooltip, T
 import { deleteWeighIn, listSessions, listWeighIns } from '../lib/db'
 import type { Session, WeighIn } from '../lib/types'
 import { formatWeight } from '../lib/units'
+import { setTotalReps, setVolumeKg } from '../lib/setMath'
 import { useSettings } from '../store/settings'
 
 type Item =
@@ -205,7 +206,7 @@ function SessionCard({ session, unit, userBwKg, onClick }: { session: Session; u
     const sets = session.exercises.reduce((n, e) => n + e.sets.length, 0)
     const tonnage = session.exercises.reduce((n, e) => {
       const eff = e.bodyweight ? userBwKg : 0
-      return n + e.sets.reduce((m, s) => m + s.reps * (Number(s.weight) + eff), 0)
+      return n + e.sets.reduce((m, s) => m + setVolumeKg(s) + setTotalReps(s) * eff, 0)
     }, 0)
     subtitle = `${session.exercises.length} exos · ${sets} séries · ${formatWeight(tonnage, unit, 0).replace('.0', '')}`
   }

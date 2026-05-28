@@ -29,6 +29,7 @@ import {
 } from '../lib/db'
 import type { Session, SessionType, WeighIn, WeighSlot } from '../lib/types'
 import { formatWeight, fromKg, parseDecimal, round, toKg } from '../lib/units'
+import { setTotalReps, setVolumeKg } from '../lib/setMath'
 import { dateToDayKey, useSettings } from '../store/settings'
 import { maybeFireReminder } from '../lib/notifications'
 import { MonthlyCalendar } from '../components/MonthlyCalendar'
@@ -89,7 +90,7 @@ export function Today() {
   const weekVolume = weekSessions.reduce((acc, s) => {
     for (const ex of s.exercises) {
       const effective = ex.bodyweight ? userBwKg : 0
-      for (const set of ex.sets) acc += set.reps * (Number(set.weight) + effective)
+      for (const set of ex.sets) acc += setVolumeKg(set) + setTotalReps(set) * effective
     }
     return acc
   }, 0)

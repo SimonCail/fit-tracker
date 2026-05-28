@@ -10,6 +10,7 @@ import { listSessions } from '../lib/db'
 import type { ExerciseSet, Session } from '../lib/types'
 import { normalizeExerciseName } from '../lib/exerciseName'
 import { fromKg, round } from '../lib/units'
+import { setMaxWeightKg, setTotalReps, setVolumeKg } from '../lib/setMath'
 import { useSettings } from '../store/settings'
 
 type HistorySet = ExerciseSet & { sessionId: string; date: string }
@@ -59,14 +60,14 @@ export function ExerciseHistoryPage() {
     const byDateMap = new Map<string, { date: string; max: number; volume: number }>()
     for (const s of sets) {
       const row = byDateMap.get(s.date) ?? { date: s.date, max: 0, volume: 0 }
-      const wKg = Number(s.weight)
-      if (wKg > row.max) row.max = wKg
-      row.volume += s.reps * wKg
+      const peak = setMaxWeightKg(s)
+      if (peak > row.max) row.max = peak
+      row.volume += setVolumeKg(s)
       byDateMap.set(s.date, row)
     }
     const byDate = [...byDateMap.values()].sort((a, b) => a.date.localeCompare(b.date))
-    const record = sets.reduce((m, s) => Math.max(m, Number(s.weight)), 0)
-    const volumeTotal = sets.reduce((v, s) => v + s.reps * Number(s.weight), 0)
+    const record = sets.reduce((m, s) => Math.max(m, setMaxWeightKg(s)), 0)
+    const volumeTotal = sets.reduce((v, s) => v + setVolumeKg(s), 0)
     return { displayName, allSets: sets, byDate, record, volumeTotal, bodyweight }
   }, [sessions, normKey])
 
@@ -141,7 +142,7 @@ export function ExerciseHistoryPage() {
         />
         <StatCell label="Séries" value={String(allSets.length)} />
         {bodyweight ? (
-          <StatCell label="Reps total" value={String(allSets.reduce((n, s) => n + s.reps, 0))} icon={<Flame size={12} />} />
+          <StatCell label="Reps total" value={String(allSets.reduce((n, s) => n + setTotalReps(s), 0))} icon={<Flame size={12} />} />
         ) : (
           <StatCell label="Volume" value={formatBigNum(fromKg(volumeTotal, unit))} suffix={unit} icon={<Flame size={12} />} />
         )}
@@ -190,19 +191,37 @@ export function ExerciseHistoryPage() {
             </button>
             <div className="space-y-1">
               {sets.map((s, i) => (
-                <div key={s.id} className="grid grid-cols-[2rem_1fr_1fr] items-center gap-2 py-1 text-sm">
-                  <span className="text-[10px] font-mono tabular text-[color:var(--color-text-dim)] text-center">{String(i + 1).padStart(2, '0')}</span>
-                  <span className="font-display tabular text-center">{s.reps}</span>
-                  <span className="font-display tabular text-center">
-                    {bodyweight && Number(s.weight) <= 0 ? (
-                      <span className="text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-semibold">PDC</span>
-                    ) : (
-                      <>
-                        {bodyweight ? '+' : ''}{round(fromKg(Number(s.weight), unit), 1)}
-                        <span className="text-[10px] text-[color:var(--color-text-dim)] ml-1">{unit}</span>
-                      </>
-                    )}
-                  </span>
+                <div key={s.id}>
+                  <div className="grid grid-cols-[2rem_1fr_1fr] items-center gap-2 py-1 text-sm">
+                    <span className="text-[10px] font-mono tabular text-[color:var(--color-text-dim)] text-center">{String(i + 1).padStart(2, '0')}</span>
+                    <span className="font-display tabular text-center">{s.reps}</span>
+                    <span className="font-display tabular text-center">
+                      {bodyweight && Number(s.weight) <= 0 ? (
+                        <span className="text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-semibold">PDC</span>
+                      ) : (
+                        <>
+                          {bodyweight ? '+' : ''}{round(fromKg(Number(s.weight), unit), 1)}
+                          <span className="text-[10px] text-[color:var(--color-text-dim)] ml-1">{unit}</span>
+                        </>
+                      )}
+                    </span>
+                  </div>
+                  {s.drops?.map(d => (
+                    <div key={d.id} className="grid grid-cols-[2rem_1fr_1fr] items-center gap-2 py-0.5 text-xs text-[color:var(--color-text-dim)]">
+                      <span className="text-[9px] font-mono tabular text-center">↳</span>
+                      <span className="font-display tabular text-center">{d.reps}</span>
+                      <span className="font-display tabular text-center">
+                        {bodyweight && Number(d.weight) <= 0 ? (
+                          <span className="text-[9px] uppercase tracking-widest font-semibold">PDC</span>
+                        ) : (
+                          <>
+                            {bodyweight ? '+' : ''}{round(fromKg(Number(d.weight), unit), 1)}
+                            <span className="text-[9px] ml-1">{unit}</span>
+                          </>
+                        )}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>

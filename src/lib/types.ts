@@ -1,7 +1,15 @@
+export type SetDrop = {
+  id: string
+  reps: number
+  weight: number
+}
+
 export type ExerciseSet = {
   id: string
   reps: number
   weight: number
+  /** Optional drop-set continuations (same set, lighter weight, more reps). */
+  drops?: SetDrop[]
 }
 
 export type Exercise = {

@@ -8,21 +8,25 @@ import { Button, Card, EmptyState, Input, Label, Sheet, SheetBody, SheetContent,
 import {
   addExercise,
   addSet,
+  addSetDrop,
   deleteExercise,
   deleteSession,
   deleteSet,
+  deleteSetDrop,
   getDistinctExerciseNames,
   getSession,
   listSessions,
   updateRunningSession,
   updateSession,
   updateSet,
+  updateSetDrop,
 } from '../lib/db'
-import type { Exercise, ExerciseSet, Session } from '../lib/types'
+import type { Exercise, ExerciseSet, Session, SetDrop } from '../lib/types'
 import { formatWeight, fromKg, parseDecimal, round, toKg } from '../lib/units'
 import { normalizeExerciseName, slugifyExerciseName } from '../lib/exerciseName'
 import { buildPreviousPerformances, findLastSimilarSession } from '../lib/similarSession'
 import type { PreviousPerformance } from '../lib/similarSession'
+import { setMaxWeightKg, setTotalReps, setVolumeKg } from '../lib/setMath'
 import { useSettings } from '../store/settings'
 import { RestTimer } from '../components/RestTimer'
 
@@ -70,7 +74,7 @@ export function SessionPage() {
         for (const ex of sess.exercises) {
           for (const set of ex.sets) {
             const n = ex.name.trim()
-            prs[n] = Math.max(prs[n] ?? 0, Number(set.weight))
+            prs[n] = Math.max(prs[n] ?? 0, setMaxWeightKg(set))
           }
         }
       }
@@ -313,9 +317,9 @@ function ExerciseCard({
   const [weight, setWeight] = useState('')
   const [adding, setAdding] = useState(false)
   const lastSet = exercise.sets[exercise.sets.length - 1]
-  const bestKg = exercise.sets.reduce((m, s) => Math.max(m, Number(s.weight)), 0)
+  const bestKg = exercise.sets.reduce((m, s) => Math.max(m, setMaxWeightKg(s)), 0)
   const bestPreview = useMemo(() => {
-    // Best = heaviest weight; ties broken by higher reps.
+    // Best = heaviest weight; ties broken by higher reps. Compares main effort only.
     const best = exercise.sets.reduce<ExerciseSet | null>((m, s) => {
       if (!m) return s
       const sw = Number(s.weight)
@@ -325,7 +329,7 @@ function ExerciseCard({
       return m
     }, null)
     if (!best) return null
-    const volumeKg = exercise.sets.reduce((sum, s) => sum + Number(s.reps) * Number(s.weight), 0)
+    const volumeKg = exercise.sets.reduce((sum, s) => sum + setVolumeKg(s), 0)
     return { set: best, volumeKg }
   }, [exercise.sets])
 
@@ -418,7 +422,7 @@ function ExerciseCard({
             {previous.sets.map((s, i) => (
               <span key={s.id}>
                 {i > 0 && <span className="text-[color:var(--color-text-dim)]/50"> · </span>}
-                {compactSet(Number(s.weight), s.reps, unit, previous.bodyweight)}
+                {compactSetWithDrops(s, unit, previous.bodyweight)}
               </span>
             ))}
           </div>
@@ -437,7 +441,7 @@ function ExerciseCard({
           />
           <MiniStat
             label="Volume"
-            value={isBw ? `${exercise.sets.reduce((n, s) => n + s.reps, 0)}` : formatVolume(bestPreview.volumeKg, unit)}
+            value={isBw ? `${exercise.sets.reduce((n, s) => n + setTotalReps(s), 0)}` : formatVolume(bestPreview.volumeKg, unit)}
             suffix={isBw ? 'reps' : unit}
           />
           <MiniStat label="Séries" value={String(exercise.sets.length)} />
@@ -458,11 +462,13 @@ function ExerciseCard({
                 key={set.id}
                 sessionId={sessionId}
                 exerciseId={exercise.id}
+                exerciseName={exercise.name}
                 index={i + 1}
                 set={set}
                 unit={unit}
                 bodyweight={isBw}
                 onChange={onChange}
+                onSetAdded={onSetAdded}
               />
             ))}
           </div>
@@ -533,6 +539,14 @@ function compactSet(weightKg: number, reps: number, unit: 'kg' | 'lb', bodyweigh
   return `${reps}×${bodyweight ? '+' : ''}${round(fromKg(weightKg, unit), 1)}`
 }
 
+/** Like compactSet, but appends drop stages with a chevron. e.g. "8×15→4×13". */
+function compactSetWithDrops(s: ExerciseSet, unit: 'kg' | 'lb', bodyweight: boolean): string {
+  const main = compactSet(Number(s.weight), s.reps, unit, bodyweight)
+  if (!s.drops || s.drops.length === 0) return main
+  const tail = s.drops.map(d => compactSet(Number(d.weight), d.reps, unit, bodyweight)).join('→')
+  return `${main}→${tail}`
+}
+
 /** Read-only exercise row shown in the "last similar session" recap sheet. */
 function RecapExercise({
   exercise,
@@ -569,7 +583,7 @@ function RecapExercise({
               className="inline-flex items-baseline gap-1.5 rounded-lg bg-[color:var(--color-surface-2)] border border-[color:var(--color-border)] px-2 py-1"
             >
               <span className="text-[9px] font-mono tabular text-[color:var(--color-text-dim)]">{String(i + 1).padStart(2, '0')}</span>
-              <span className="font-display tabular text-sm">{compactSet(Number(s.weight), s.reps, unit, isBw)}</span>
+              <span className="font-display tabular text-sm">{compactSetWithDrops(s, unit, isBw)}</span>
             </span>
           ))}
         </div>
@@ -593,23 +607,31 @@ function MiniStat({ label, value, suffix }: { label: string; value: string; suff
 function SetRow({
   sessionId,
   exerciseId,
+  exerciseName,
   index,
   set,
   unit,
   bodyweight,
   onChange,
+  onSetAdded,
 }: {
   sessionId: string
   exerciseId: string
+  exerciseName: string
   index: number
   set: ExerciseSet
   unit: 'kg' | 'lb'
   bodyweight: boolean
   onChange: () => void
+  onSetAdded: (name: string, weightKg: number, bodyweight: boolean) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [reps, setReps] = useState(String(set.reps))
   const [weight, setWeight] = useState(String(round(fromKg(Number(set.weight), unit), 1)))
+  const [addingDrop, setAddingDrop] = useState(false)
+  const [dropReps, setDropReps] = useState('')
+  const [dropWeight, setDropWeight] = useState('')
+  const [submittingDrop, setSubmittingDrop] = useState(false)
 
   async function save() {
     const parsed = parseDecimal(weight)
@@ -624,15 +646,195 @@ function SetRow({
     onChange()
   }
 
+  async function submitDrop(e: React.FormEvent) {
+    e.preventDefault()
+    if (!dropReps || submittingDrop) return
+    if (!bodyweight && !dropWeight) return
+    const parsed = dropWeight ? parseDecimal(dropWeight) : 0
+    if (Number.isNaN(parsed) || parsed < 0) return
+    setSubmittingDrop(true)
+    const weightKg = toKg(parsed, unit)
+    try {
+      await addSetDrop(sessionId, exerciseId, set.id, Number(dropReps), weightKg)
+      setDropReps('')
+      setDropWeight('')
+      setAddingDrop(false)
+      onChange()
+      onSetAdded(exerciseName, weightKg, bodyweight)
+    } finally {
+      setSubmittingDrop(false)
+    }
+  }
+
+  return (
+    <div>
+      {editing ? (
+        <div className="grid grid-cols-[2rem_1fr_1fr_2rem] items-center gap-2 py-1.5 px-2 bg-[color:var(--color-accent-soft)] rounded-lg -mx-2">
+          <span className="text-[10px] font-mono tabular text-[color:var(--color-text-dim)] text-center">{String(index).padStart(2, '0')}</span>
+          <Input
+            type="number"
+            value={reps}
+            onChange={e => setReps(e.target.value)}
+            className="h-9 text-center font-display text-base tabular px-2"
+            inputMode="numeric"
+            autoFocus
+          />
+          <Input
+            type="text"
+            value={weight}
+            onChange={e => setWeight(e.target.value)}
+            className="h-9 text-center font-display text-base tabular px-2"
+            inputMode="decimal"
+            pattern="[0-9]*[.,]?[0-9]*"
+            autoComplete="off"
+          />
+          <div className="flex items-center justify-end gap-1">
+            <button
+              type="button"
+              onClick={save}
+              className="p-1.5 rounded-full bg-[color:var(--color-accent-fill)] text-[color:var(--color-accent-text)] hover:bg-[color:var(--color-accent-fill-hover)] transition-colors cursor-pointer"
+              aria-label="Enregistrer"
+            >
+              <Check size={12} />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div
+          onClick={() => setEditing(true)}
+          className="group grid grid-cols-[2rem_1fr_1fr_2rem] items-center gap-2 py-2.5 px-2 hover:bg-[color:var(--color-surface-2)]/60 cursor-pointer transition-colors"
+          role="button"
+          tabIndex={0}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditing(true) } }}
+        >
+          <span className="text-[10px] font-mono tabular text-[color:var(--color-text-dim)] text-center">
+            {String(index).padStart(2, '0')}
+          </span>
+          <span className="font-display text-lg tabular text-center leading-none">{set.reps}</span>
+          <span className="font-display text-lg tabular text-center leading-none">
+            {bodyweight && Number(set.weight) <= 0
+              ? <span className="text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-semibold">PDC</span>
+              : `${bodyweight ? '+' : ''}${round(fromKg(Number(set.weight), unit), 1)}`}
+          </span>
+          <div className="flex items-center justify-end">
+            <button
+              onClick={e => { e.stopPropagation(); remove() }}
+              className="p-1.5 rounded-full text-[color:var(--color-text-dim)]/60 hover:text-[color:var(--color-danger)] hover:bg-[color:var(--color-danger)]/10 transition-all cursor-pointer"
+              aria-label="Supprimer la série"
+            >
+              <Trash2 size={12} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {set.drops?.map(drop => (
+        <DropRow
+          key={drop.id}
+          sessionId={sessionId}
+          exerciseId={exerciseId}
+          setId={set.id}
+          drop={drop}
+          unit={unit}
+          bodyweight={bodyweight}
+          onChange={onChange}
+        />
+      ))}
+
+      {addingDrop ? (
+        <form
+          onSubmit={submitDrop}
+          className="grid grid-cols-[2rem_1fr_1fr_2rem] items-center gap-2 py-1.5 px-2 -mx-2"
+        >
+          <span className="text-center text-[color:var(--color-text-dim)] text-xs">↳</span>
+          <Input
+            type="number"
+            value={dropReps}
+            onChange={e => setDropReps(e.target.value)}
+            className="h-9 text-center font-display text-sm tabular px-2"
+            inputMode="numeric"
+            placeholder="reps"
+            autoFocus
+          />
+          <Input
+            type="text"
+            value={dropWeight}
+            onChange={e => setDropWeight(e.target.value)}
+            className="h-9 text-center font-display text-sm tabular px-2"
+            inputMode="decimal"
+            pattern="[0-9]*[.,]?[0-9]*"
+            autoComplete="off"
+            placeholder={bodyweight ? `lest ${unit}` : unit}
+          />
+          <div className="flex items-center justify-end gap-1">
+            <button
+              type="submit"
+              disabled={submittingDrop || !dropReps || (!bodyweight && !dropWeight)}
+              className="p-1.5 rounded-full bg-[color:var(--color-accent-fill)] text-[color:var(--color-accent-text)] hover:bg-[color:var(--color-accent-fill-hover)] disabled:opacity-40 transition-colors cursor-pointer"
+              aria-label="Ajouter le drop"
+            >
+              <Check size={12} />
+            </button>
+          </div>
+        </form>
+      ) : (
+        !editing && (
+          <button
+            type="button"
+            onClick={() => setAddingDrop(true)}
+            className="ml-8 mt-0.5 mb-1 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] hover:text-[color:var(--color-accent)] font-medium transition-colors cursor-pointer inline-flex items-center gap-1"
+          >
+            + Drop
+          </button>
+        )
+      )}
+    </div>
+  )
+}
+
+function DropRow({
+  sessionId,
+  exerciseId,
+  setId,
+  drop,
+  unit,
+  bodyweight,
+  onChange,
+}: {
+  sessionId: string
+  exerciseId: string
+  setId: string
+  drop: SetDrop
+  unit: 'kg' | 'lb'
+  bodyweight: boolean
+  onChange: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [reps, setReps] = useState(String(drop.reps))
+  const [weight, setWeight] = useState(String(round(fromKg(Number(drop.weight), unit), 1)))
+
+  async function save() {
+    const parsed = parseDecimal(weight)
+    if (Number.isNaN(parsed) || parsed < 0) return
+    await updateSetDrop(sessionId, exerciseId, setId, drop.id, { reps: Number(reps), weight: toKg(parsed, unit) })
+    setEditing(false)
+    onChange()
+  }
+
+  async function remove() {
+    await deleteSetDrop(sessionId, exerciseId, setId, drop.id)
+    onChange()
+  }
+
   if (editing) {
     return (
-      <div className="grid grid-cols-[2rem_1fr_1fr_2rem] items-center gap-2 py-1.5 px-2 bg-[color:var(--color-accent-soft)] rounded-lg -mx-2">
-        <span className="text-[10px] font-mono tabular text-[color:var(--color-text-dim)] text-center">{String(index).padStart(2, '0')}</span>
+      <div className="grid grid-cols-[2rem_1fr_1fr_2rem] items-center gap-2 py-1 px-2 bg-[color:var(--color-accent-soft)]/60 rounded-lg -mx-2">
+        <span className="text-center text-[color:var(--color-text-dim)] text-xs">↳</span>
         <Input
           type="number"
           value={reps}
           onChange={e => setReps(e.target.value)}
-          className="h-9 text-center font-display text-base tabular px-2"
+          className="h-8 text-center font-display text-sm tabular px-2"
           inputMode="numeric"
           autoFocus
         />
@@ -640,7 +842,7 @@ function SetRow({
           type="text"
           value={weight}
           onChange={e => setWeight(e.target.value)}
-          className="h-9 text-center font-display text-base tabular px-2"
+          className="h-8 text-center font-display text-sm tabular px-2"
           inputMode="decimal"
           pattern="[0-9]*[.,]?[0-9]*"
           autoComplete="off"
@@ -649,10 +851,10 @@ function SetRow({
           <button
             type="button"
             onClick={save}
-            className="p-1.5 rounded-full bg-[color:var(--color-accent-fill)] text-[color:var(--color-accent-text)] hover:bg-[color:var(--color-accent-fill-hover)] transition-colors cursor-pointer"
-            aria-label="Enregistrer"
+            className="p-1 rounded-full bg-[color:var(--color-accent-fill)] text-[color:var(--color-accent-text)] hover:bg-[color:var(--color-accent-fill-hover)] transition-colors cursor-pointer"
+            aria-label="Enregistrer le drop"
           >
-            <Check size={12} />
+            <Check size={11} />
           </button>
         </div>
       </div>
@@ -662,27 +864,25 @@ function SetRow({
   return (
     <div
       onClick={() => setEditing(true)}
-      className="group grid grid-cols-[2rem_1fr_1fr_2rem] items-center gap-2 py-2.5 px-2 hover:bg-[color:var(--color-surface-2)]/60 cursor-pointer transition-colors"
+      className="group grid grid-cols-[2rem_1fr_1fr_2rem] items-center gap-2 py-1 px-2 hover:bg-[color:var(--color-surface-2)]/60 cursor-pointer transition-colors text-[color:var(--color-text-dim)]"
       role="button"
       tabIndex={0}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditing(true) } }}
     >
-      <span className="text-[10px] font-mono tabular text-[color:var(--color-text-dim)] text-center">
-        {String(index).padStart(2, '0')}
-      </span>
-      <span className="font-display text-lg tabular text-center leading-none">{set.reps}</span>
-      <span className="font-display text-lg tabular text-center leading-none">
-        {bodyweight && Number(set.weight) <= 0
-          ? <span className="text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-semibold">PDC</span>
-          : `${bodyweight ? '+' : ''}${round(fromKg(Number(set.weight), unit), 1)}`}
+      <span className="text-center text-xs">↳</span>
+      <span className="font-display text-sm tabular text-center leading-none">{drop.reps}</span>
+      <span className="font-display text-sm tabular text-center leading-none">
+        {bodyweight && Number(drop.weight) <= 0
+          ? <span className="text-[10px] uppercase tracking-widest font-semibold">PDC</span>
+          : `${bodyweight ? '+' : ''}${round(fromKg(Number(drop.weight), unit), 1)}`}
       </span>
       <div className="flex items-center justify-end">
         <button
           onClick={e => { e.stopPropagation(); remove() }}
-          className="p-1.5 rounded-full text-[color:var(--color-text-dim)]/60 hover:text-[color:var(--color-danger)] hover:bg-[color:var(--color-danger)]/10 transition-all cursor-pointer"
-          aria-label="Supprimer la série"
+          className="p-1 rounded-full text-[color:var(--color-text-dim)]/60 hover:text-[color:var(--color-danger)] hover:bg-[color:var(--color-danger)]/10 transition-all cursor-pointer"
+          aria-label="Supprimer le drop"
         >
-          <Trash2 size={12} />
+          <Trash2 size={11} />
         </button>
       </div>
     </div>

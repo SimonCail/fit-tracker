@@ -15,8 +15,9 @@ import {
   where,
 } from 'firebase/firestore'
 import { auth, db } from './firebase'
-import type { Exercise, ExerciseSet, Session, SessionType, WeighIn, WeighSlot } from './types'
+import type { Exercise, ExerciseSet, Session, SessionType, SetDrop, WeighIn, WeighSlot } from './types'
 import { isBodyweightExerciseName } from './exerciseName'
+import { setMaxWeightKg, setVolumeKg } from './setMath'
 
 function uid(): string {
   const u = auth.currentUser
@@ -231,6 +232,66 @@ export async function deleteSet(sessionId: string, exerciseId: string, setId: st
   )
 }
 
+function mapSet(e: Exercise, setId: string, fn: (s: ExerciseSet) => ExerciseSet): Exercise {
+  return { ...e, sets: e.sets.map(s => (s.id === setId ? fn(s) : s)) }
+}
+
+export async function addSetDrop(
+  sessionId: string,
+  exerciseId: string,
+  setId: string,
+  reps: number,
+  weight: number,
+): Promise<SetDrop> {
+  const newDrop: SetDrop = { id: uuid(), reps, weight }
+  await mutateExercises(sessionId, prev =>
+    prev.map(e =>
+      e.id === exerciseId
+        ? mapSet(e, setId, s => ({ ...s, drops: [...(s.drops ?? []), newDrop] }))
+        : e,
+    ),
+  )
+  return newDrop
+}
+
+export async function updateSetDrop(
+  sessionId: string,
+  exerciseId: string,
+  setId: string,
+  dropId: string,
+  patch: Partial<Pick<SetDrop, 'reps' | 'weight'>>,
+) {
+  await mutateExercises(sessionId, prev =>
+    prev.map(e =>
+      e.id === exerciseId
+        ? mapSet(e, setId, s => ({
+            ...s,
+            drops: (s.drops ?? []).map(d => (d.id === dropId ? { ...d, ...patch } : d)),
+          }))
+        : e,
+    ),
+  )
+}
+
+export async function deleteSetDrop(
+  sessionId: string,
+  exerciseId: string,
+  setId: string,
+  dropId: string,
+) {
+  await mutateExercises(sessionId, prev =>
+    prev.map(e => {
+      if (e.id !== exerciseId) return e
+      return mapSet(e, setId, s => {
+        const drops = (s.drops ?? []).filter(d => d.id !== dropId)
+        const next: ExerciseSet = { ...s, drops }
+        if (drops.length === 0) delete next.drops
+        return next
+      })
+    }),
+  )
+}
+
 export async function listWeighIns(max = 180): Promise<WeighIn[]> {
   const q = query(weighInsCol(), orderBy('createdAt', 'desc'), limit(max))
   const snap = await getDocs(q)
@@ -334,6 +395,14 @@ export async function setExerciseBodyweightEverywhere(
         nextSets = ex.sets.map(s => ({
           ...s,
           weight: Math.max(0, Number(s.weight) - subtractBodyweightKg),
+          ...(s.drops && s.drops.length > 0
+            ? {
+                drops: s.drops.map(d => ({
+                  ...d,
+                  weight: Math.max(0, Number(d.weight) - subtractBodyweightKg),
+                })),
+              }
+            : {}),
         }))
       }
       return { ...ex, bodyweight, sets: nextSets }
@@ -393,8 +462,9 @@ export async function getExerciseAggregates(
       entry.totalSets += ex.sets.length
       if (ex.bodyweight) entry.bodyweight = true
       for (const set of ex.sets) {
-        entry.totalVolumeKg += set.reps * Number(set.weight)
-        if (Number(set.weight) > entry.bestWeightKg) entry.bestWeightKg = Number(set.weight)
+        entry.totalVolumeKg += setVolumeKg(set)
+        const peak = setMaxWeightKg(set)
+        if (peak > entry.bestWeightKg) entry.bestWeightKg = peak
       }
       if (s.date > entry.lastUsedIso) entry.lastUsedIso = s.date
       map.set(key, entry)
