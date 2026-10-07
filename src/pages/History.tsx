@@ -1,19 +1,29 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Dumbbell, Footprints, Scale, ChevronRight, Search, Trash2, X, Sunrise, Moon } from 'lucide-react'
+import { ChevronRight, Moon, Search, Sunrise, X } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { fr } from 'date-fns/locale'
-import { motion } from 'framer-motion'
-import { Card, EmptyState, Input, Label, Skeleton, Badge, useConfirm, Tooltip, TooltipContent, TooltipTrigger } from '../components/ui'
+import { Card, Disc, EmptyState, ErrorNote, Input, Skeleton, useConfirm } from '../components/ui'
+import { PageHeader } from '../components/Layout'
 import { deleteWeighIn, listSessions, listWeighIns } from '../lib/db'
 import type { Session, WeighIn } from '../lib/types'
-import { formatWeight } from '../lib/units'
+import { frNum, fromKg } from '../lib/units'
 import { setTotalReps, setVolumeKg } from '../lib/setMath'
 import { useSettings } from '../store/settings'
+import { cn } from '../lib/cn'
 
 type Item =
   | { kind: 'session'; data: Session }
   | { kind: 'weigh'; data: WeighIn }
+
+type Filter = 'all' | 'strength' | 'running' | 'weigh'
+
+const FILTERS: { value: Filter; label: string }[] = [
+  { value: 'all', label: 'Tout' },
+  { value: 'strength', label: 'Muscu' },
+  { value: 'running', label: 'Course' },
+  { value: 'weigh', label: 'Pesées' },
+]
 
 export function History() {
   const nav = useNavigate()
@@ -25,6 +35,7 @@ export function History() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<Filter>('all')
   const dayFilter = params.get('d')
 
   async function load() {
@@ -50,221 +61,214 @@ export function History() {
       if (a.data.date !== b.data.date) return b.data.date.localeCompare(a.data.date)
       return b.data.createdAt - a.data.createdAt
     })
-    let filtered = all
-    if (dayFilter) filtered = filtered.filter(it => it.data.date === dayFilter)
-    if (!query.trim()) return filtered
+    let out = all
+    if (dayFilter) out = out.filter(it => it.data.date === dayFilter)
+    if (filter === 'weigh') out = out.filter(it => it.kind === 'weigh')
+    if (filter === 'strength') out = out.filter(it => it.kind === 'session' && it.data.type !== 'running')
+    if (filter === 'running') out = out.filter(it => it.kind === 'session' && it.data.type === 'running')
     const q = query.toLowerCase().trim()
-    return filtered.filter(it => {
+    if (!q) return out
+    return out.filter(it => {
+      const parts: string[] = [it.data.date, format(parseISO(it.data.date), 'd MMMM yyyy EEEE', { locale: fr })]
       if (it.kind === 'session') {
         const s = it.data
-        const parts: string[] = []
-        parts.push(s.notes ?? '')
-        parts.push(s.type === 'running' ? 'course running' : 'muscu musculation')
-        parts.push(s.date) // allow searching by ISO date e.g. "2026-04"
-        parts.push(format(parseISO(s.date), 'd MMMM yyyy EEEE', { locale: fr }))
+        parts.push(s.notes ?? '', s.type === 'running' ? 'course running' : 'muscu musculation')
         for (const ex of s.exercises) parts.push(ex.name)
         if (s.route) parts.push(s.route)
         if (s.distanceMeters) parts.push(`${Math.round(s.distanceMeters / 100) / 10} km`)
-        return parts.join(' ').toLowerCase().includes(q)
+      } else {
+        const w = it.data
+        parts.push(String(w.weight), `${w.weight} kg`, w.note ?? '', w.slot === 'morning' ? 'matin' : w.slot === 'evening' ? 'soir' : '', 'pesée poids')
       }
-      const w = it.data
-      const parts: string[] = []
-      parts.push(String(w.weight))
-      parts.push(`${w.weight} kg`)
-      parts.push(w.note ?? '')
-      parts.push(w.slot === 'morning' ? 'matin' : w.slot === 'evening' ? 'soir' : '')
-      parts.push('pesée poids')
-      parts.push(w.date)
-      parts.push(format(parseISO(w.date), 'd MMMM yyyy EEEE', { locale: fr }))
       return parts.join(' ').toLowerCase().includes(q)
     })
-  }, [sessions, weighIns, query, dayFilter])
+  }, [sessions, weighIns, query, dayFilter, filter])
 
   const grouped = useMemo(() => {
     const map = new Map<string, Item[]>()
     for (const it of items) {
-      const k = it.data.date
-      const arr = map.get(k) ?? []
+      const arr = map.get(it.data.date) ?? []
       arr.push(it)
-      map.set(k, arr)
+      map.set(it.data.date, arr)
     }
     return [...map.entries()]
   }, [items])
 
   async function removeWeigh(id: string) {
-    const ok = await confirm({
-      title: 'Supprimer cette pesée ?',
-      description: 'Cette action est définitive.',
-      confirmLabel: 'Supprimer',
-      danger: true,
-    })
+    const ok = await confirm({ title: 'Supprimer cette pesée ?', confirmLabel: 'Supprimer', danger: true })
     if (!ok) return
     await deleteWeighIn(id)
     await load()
   }
 
-  return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="py-8">
-      <div className="mb-2">
-        <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text-dim)] font-medium">Journal</p>
-        <h1 className="font-display text-5xl leading-[1.05] mt-2">Historique</h1>
-      </div>
+  const userBwKg = weighIns[0]?.weight ?? 0
 
-      <div className="relative mt-8 mb-6">
-        <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-[color:var(--color-text-dim)]" />
+  return (
+    <>
+      <PageHeader title="Journal" />
+
+      <div className="relative lg:max-w-xl">
+        <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-faint pointer-events-none" />
         <Input
           value={query}
           onChange={e => setQuery(e.target.value)}
-          placeholder="Rechercher (exo, parcours, date, pesée…)"
-          className="pl-10"
+          placeholder="Exercice, parcours, date…"
+          className="pl-11 pr-11"
+          type="search"
+          enterKeyHint="search"
+          aria-label="Rechercher dans le journal"
         />
+        {query && (
+          <button onClick={() => setQuery('')} className="absolute right-1 top-1/2 -translate-y-1/2 h-10 w-10 grid place-items-center text-faint cursor-pointer" aria-label="Effacer la recherche">
+            <X size={18} />
+          </button>
+        )}
       </div>
 
-      {dayFilter && (
-        <div className="mb-6 flex items-center gap-2">
-          <Badge className="capitalize">
-            {format(parseISO(dayFilter), 'EEEE d MMMM', { locale: fr })}
-          </Badge>
+      <div className="flex gap-2 mt-3 overflow-x-auto no-scrollbar -mx-4 px-4">
+        {dayFilter && (
           <button
             onClick={() => setParams({})}
-            className="text-xs text-[color:var(--color-text-dim)] hover:text-[color:var(--color-text)] flex items-center gap-1"
+            className="h-9 shrink-0 rounded-full bg-ink text-bg pl-3.5 pr-2.5 text-[14px] font-semibold flex items-center gap-1.5 cursor-pointer"
+            aria-label="Retirer le filtre de date"
           >
-            <X size={12} /> Retirer le filtre
+            <span className="first-letter:uppercase">{format(parseISO(dayFilter), 'EEEE d MMM', { locale: fr })}</span>
+            <X size={16} />
           </button>
-        </div>
-      )}
+        )}
+        {FILTERS.map(f => (
+          <button
+            key={f.value}
+            onClick={() => setFilter(f.value)}
+            aria-pressed={filter === f.value}
+            className={cn(
+              'h-9 shrink-0 rounded-full px-4 text-[14px] font-semibold cursor-pointer transition-colors',
+              filter === f.value ? 'bg-surface text-ink shadow-[inset_0_0_0_1.5px_var(--color-ink)]' : 'bg-surface text-dim',
+            )}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
 
-      {loading ? (
-        <div className="space-y-4">
-          {[0, 1, 2, 3].map(i => (
-            <div key={i} className="space-y-2">
-              <Skeleton className="h-3 w-24 mb-3" />
-              <Skeleton className="h-16 rounded-2xl" />
-            </div>
-          ))}
-        </div>
-      ) : error ? (
-        <Card className="p-5 border-[color:var(--color-danger)]/40">
-          <p className="font-medium text-[color:var(--color-danger)] mb-1">Erreur de chargement</p>
-          <p className="text-sm text-[color:var(--color-text-dim)] break-words">{error}</p>
-        </Card>
-      ) : grouped.length === 0 ? (
-        <EmptyState title="Rien ici" subtitle="Lance une séance ou enregistre une pesée — tout apparaîtra ici." />
-      ) : (
-        <div className="space-y-8">
-          {grouped.map(([date, list]) => (
-            <div key={date}>
-              <div className="flex items-baseline gap-4 mb-3">
-                <span className="font-display text-3xl tabular text-[color:var(--color-text)]">
-                  {format(parseISO(date), 'dd')}
-                </span>
-                <div className="flex-1">
-                  <Label>{format(parseISO(date), 'MMMM', { locale: fr })}</Label>
-                  <p className="text-xs text-[color:var(--color-text-dim)] capitalize">
-                    {format(parseISO(date), 'EEEE · yyyy', { locale: fr })}
-                  </p>
-                </div>
+      <div className="mt-6">
+        {loading ? (
+          <div className="space-y-6">
+            {[0, 1, 2].map(i => (
+              <div key={i}>
+                <Skeleton className="h-5 w-40 mb-3" />
+                <Skeleton className="h-[72px] rounded-[var(--radius-card)]" />
               </div>
-              <div className="space-y-2">
-                {list.map(it =>
-                  it.kind === 'session' ? (
-                    <SessionCard key={`s-${it.data.id}`} session={it.data} unit={unit} userBwKg={weighIns[0]?.weight ?? 0} onClick={() => nav(`/session/${it.data.id}`)} />
-                  ) : (
-                    <WeighInCard key={`w-${it.data.id}`} weighIn={it.data} unit={unit} onDelete={() => removeWeigh(it.data.id)} />
-                  ),
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </motion.div>
+            ))}
+          </div>
+        ) : error ? (
+          <ErrorNote message={error} />
+        ) : grouped.length === 0 ? (
+          <EmptyState
+            title={query || filter !== 'all' || dayFilter ? 'Aucun résultat' : 'Rien pour l’instant'}
+            subtitle={
+              query || filter !== 'all' || dayFilter
+                ? 'Essaie un autre mot ou retire un filtre.'
+                : 'Chaque séance et chaque pesée que tu notes s’ajoute ici, jour par jour.'
+            }
+          />
+        ) : (
+          <div className="grid gap-6 lg:grid-cols-2 2xl:grid-cols-3 lg:gap-x-8 items-start">
+            {grouped.map(([date, list]) => (
+              <section key={date} aria-label={format(parseISO(date), 'EEEE d MMMM yyyy', { locale: fr })}>
+                <h2 className="sticky top-0 sm:top-16 lg:static z-10 -mx-4 px-4 lg:mx-0 lg:px-0 py-2 bar lg:bg-transparent lg:backdrop-blur-none flex items-baseline gap-2 safe-top sm:pt-2">
+                  <span className="num text-[24px]">{format(parseISO(date), 'd')}</span>
+                  <span className="t-heading text-[15px] first-letter:uppercase">{format(parseISO(date), 'EEEE', { locale: fr })}</span>
+                  <span className="text-[14px] text-faint">{format(parseISO(date), 'MMMM yyyy', { locale: fr })}</span>
+                </h2>
+                <Card className="overflow-hidden mt-1">
+                  {list.map(it =>
+                    it.kind === 'session' ? (
+                      <SessionItem key={`s-${it.data.id}`} session={it.data} unit={unit} userBwKg={userBwKg} onClick={() => nav(`/session/${it.data.id}`)} />
+                    ) : (
+                      <WeighItem key={`w-${it.data.id}`} weighIn={it.data} unit={unit} onDelete={() => removeWeigh(it.data.id)} />
+                    ),
+                  )}
+                </Card>
+              </section>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
   )
 }
 
-function SessionCard({ session, unit, userBwKg, onClick }: { session: Session; unit: 'kg' | 'lb'; userBwKg: number; onClick: () => void }) {
-  const isRunning = session.type === 'running'
+function SessionItem({ session, unit, userBwKg, onClick }: { session: Session; unit: 'kg' | 'lb'; userBwKg: number; onClick: () => void }) {
+  const running = session.type === 'running'
+  let figure: string | null = null
+  let figureUnit = ''
+  let sub: string
 
-  let subtitle: string
-  if (isRunning) {
+  if (running) {
     const km = (session.distanceMeters ?? 0) / 1000
     const sec = session.durationSeconds ?? 0
-    const parts: string[] = []
-    if (km > 0) parts.push(`${Math.round(km * 10) / 10} km`)
-    if (sec > 0) {
-      const mm = Math.floor(sec / 60)
-      const ss = sec % 60
-      parts.push(mm > 0 ? `${mm}:${String(ss).padStart(2, '0')}` : `${ss}s`)
-    }
+    if (km > 0) { figure = frNum(km, 1); figureUnit = 'km' }
+    const bits: string[] = []
+    if (session.route) bits.push(session.route)
+    if (sec > 0) bits.push(`${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`)
     if (km > 0 && sec > 0) {
-      const pace = sec / km
-      parts.push(`${Math.floor(pace / 60)}:${String(Math.round(pace % 60)).padStart(2, '0')}/km`)
+      const p = Math.round(sec / km)
+      bits.push(`${Math.floor(p / 60)}:${String(p % 60).padStart(2, '0')} /km`)
     }
-    if (session.route) parts.unshift(session.route)
-    subtitle = parts.length > 0 ? parts.join(' · ') : 'Course'
+    sub = bits.join(', ') || 'Course'
   } else {
     const sets = session.exercises.reduce((n, e) => n + e.sets.length, 0)
     const tonnage = session.exercises.reduce((n, e) => {
       const eff = e.bodyweight ? userBwKg : 0
       return n + e.sets.reduce((m, s) => m + setVolumeKg(s) + setTotalReps(s) * eff, 0)
     }, 0)
-    subtitle = `${session.exercises.length} exos · ${sets} séries · ${formatWeight(tonnage, unit, 0).replace('.0', '')}`
+    const t = fromKg(tonnage, unit)
+    if (t > 0) {
+      figure = t >= 1000 ? frNum(t / 1000, 1) : String(Math.round(t))
+      figureUnit = t >= 1000 ? (unit === 'kg' ? 't' : 'k lb') : unit
+    }
+    sub = session.exercises.length
+      ? `${session.exercises.length} exercice${session.exercises.length > 1 ? 's' : ''}, ${sets} série${sets > 1 ? 's' : ''}`
+      : 'Séance vide'
   }
 
   return (
-    <button
-      onClick={onClick}
-      className="group w-full text-left rounded-2xl bg-[color:var(--color-surface)] border border-[color:var(--color-border)] p-4 hover:border-[color:var(--color-border-strong)] hover:-translate-y-0.5 hover:shadow-[var(--shadow-soft)] active:translate-y-0 transition-all duration-200 cursor-pointer flex items-center gap-4"
-    >
-      <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${
-        isRunning
-          ? 'bg-[#a78bfa]/15 text-[#a78bfa]'
-          : 'bg-[color:var(--color-accent-soft)] text-[color:var(--color-accent)]'
-      }`}>
-        {isRunning ? <Footprints size={18} /> : <Dumbbell size={18} />}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="font-medium truncate">{session.notes || (isRunning ? 'Course' : 'Séance')}</p>
-        <p className="text-xs text-[color:var(--color-text-dim)] mt-0.5 truncate">
-          {subtitle}
-        </p>
-      </div>
-      <ChevronRight size={16} className="text-[color:var(--color-text-dim)] group-hover:translate-x-1 transition-transform" />
+    <button onClick={onClick} className="w-full text-left flex items-center gap-3.5 px-4 py-3.5 hairline-b last:shadow-none cursor-pointer active:bg-surface-2 hover:bg-surface-2/60">
+      <Disc plate={running ? 'run' : 'lift'} size={22} />
+      <span className="flex-1 min-w-0">
+        <span className="block font-semibold truncate">{session.notes || (running ? 'Course' : 'Séance')}</span>
+        <span className="block text-[13px] text-dim truncate">{sub}</span>
+      </span>
+      {figure && (
+        <span className="shrink-0 flex items-baseline gap-0.5">
+          <span className="num text-[22px]">{figure}</span>
+          <span className="text-[12px] font-semibold text-dim">{figureUnit}</span>
+        </span>
+      )}
+      <ChevronRight size={18} className="text-faint shrink-0 -mr-1" />
     </button>
   )
 }
 
-function WeighInCard({ weighIn, unit, onDelete }: { weighIn: WeighIn; unit: 'kg' | 'lb'; onDelete: () => void }) {
-  const slotIcon = weighIn.slot === 'morning' ? <Sunrise size={18} /> : weighIn.slot === 'evening' ? <Moon size={18} /> : <Scale size={18} />
-  const slotLabel = weighIn.slot === 'morning' ? 'Matin' : weighIn.slot === 'evening' ? 'Soir' : null
+function WeighItem({ weighIn, unit, onDelete }: { weighIn: WeighIn; unit: 'kg' | 'lb'; onDelete: () => void }) {
+  const label = weighIn.slot === 'evening' ? 'Pesée du soir' : weighIn.slot === 'morning' ? 'Pesée du matin' : 'Pesée'
   return (
-    <Card className="p-4 flex items-center gap-4">
-      <div className="w-10 h-10 rounded-2xl bg-[color:var(--color-surface-2)] text-[color:var(--color-text)] flex items-center justify-center shrink-0">
-        {slotIcon}
-      </div>
-      <div className="flex-1 min-w-0 flex items-baseline gap-2 flex-wrap">
-        <p className="font-display text-xl tabular">{formatWeight(weighIn.weight, unit, 1)}</p>
-        {slotLabel && (
-          <span className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium">
-            {slotLabel}
-          </span>
-        )}
-        {weighIn.note && (
-          <p className="text-xs text-[color:var(--color-text-dim)] truncate w-full">{weighIn.note}</p>
-        )}
-      </div>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            onClick={onDelete}
-            className="p-2 rounded-full text-[color:var(--color-text-dim)] hover:text-[color:var(--color-danger)] hover:bg-[color:var(--color-danger)]/10 transition-colors cursor-pointer"
-            aria-label="Supprimer cette pesée"
-          >
-            <Trash2 size={14} />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="left">Supprimer</TooltipContent>
-      </Tooltip>
-    </Card>
+    <div className="flex items-center gap-3.5 pl-4 pr-2 py-2.5 hairline-b last:shadow-none">
+      <span className="w-[22px] grid place-items-center text-weigh">
+        {weighIn.slot === 'evening' ? <Moon size={18} /> : <Sunrise size={18} />}
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className="block font-semibold">{label}</span>
+        {weighIn.note && <span className="block text-[13px] text-dim truncate">{weighIn.note}</span>}
+      </span>
+      <span className="shrink-0 flex items-baseline gap-0.5">
+        <span className="num text-[22px]">{frNum(fromKg(weighIn.weight, unit), 1)}</span>
+        <span className="text-[12px] font-semibold text-dim">{unit}</span>
+      </span>
+      <button onClick={onDelete} className="h-10 w-10 grid place-items-center rounded-full text-faint hover:text-danger cursor-pointer" aria-label="Supprimer cette pesée">
+        <X size={17} />
+      </button>
+    </div>
   )
 }

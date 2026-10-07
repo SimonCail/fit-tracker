@@ -40,6 +40,9 @@ type SettingsState = {
   profile: Profile
   weeklyPlan: WeeklyPlan
   reminders: Reminders
+  /** Empty-bar weight for the plate calculator, in each unit system. */
+  bar: { kg: number; lb: number }
+  setBar: (unit: Unit, value: number) => void
   setTheme: (t: Theme) => void
   setUnit: (u: Unit) => void
   setRestSeconds: (s: number) => void
@@ -63,6 +66,8 @@ export const useSettings = create<SettingsState>()(
       profile: { name: null, heightCm: null, birthYear: null, sex: null },
       weeklyPlan: emptyPlan,
       reminders: { enabled: false, time: '20:00' },
+      bar: { kg: 20, lb: 45 },
+      setBar: (u, value) => set(s => ({ bar: { ...(s.bar ?? { kg: 20, lb: 45 }), [u]: value } })),
       setTheme: t => set({ theme: t }),
       setUnit: u => set({ unit: u }),
       setRestSeconds: s => set({ restSeconds: s }),
@@ -83,7 +88,7 @@ export function applyTheme(theme: Theme) {
     : theme
   root.classList.toggle('dark', resolved === 'dark')
   root.dataset.theme = resolved
-  const themeColor = resolved === 'dark' ? '#0A0A0B' : '#FAFAFA'
+  const themeColor = resolved === 'dark' ? '#000000' : '#ECEEF0'
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', themeColor)
 }
 

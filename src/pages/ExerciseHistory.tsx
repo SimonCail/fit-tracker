@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, Flame, TrendingUp } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { fr } from 'date-fns/locale'
-import { motion } from 'framer-motion'
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from 'recharts'
-import { Button, Card, EmptyState, Skeleton } from '../components/ui'
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Card, EmptyState, SectionTitle, Skeleton, Tag } from '../components/ui'
+import { PageHeader } from '../components/Layout'
 import { listSessions } from '../lib/db'
 import type { ExerciseSet, Session } from '../lib/types'
 import { normalizeExerciseName } from '../lib/exerciseName'
-import { fromKg, round } from '../lib/units'
+import { estimate1RM, frNum, fromKg, round } from '../lib/units'
 import { setMaxWeightKg, setTotalReps, setVolumeKg } from '../lib/setMath'
 import { useSettings } from '../store/settings'
+import { cn } from '../lib/cn'
 
 type HistorySet = ExerciseSet & { sessionId: string; date: string }
 
@@ -24,19 +25,12 @@ export function ExerciseHistoryPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    (async () => {
-      try {
-        const all = await listSessions(500)
-        setSessions(all)
-      } finally {
-        setLoading(false)
-      }
-    })()
+    listSessions(500).then(setSessions).finally(() => setLoading(false))
   }, [])
 
   const normKey = params.get('key') || slug || ''
 
-  const { displayName, allSets, byDate, record, volumeTotal, bodyweight } = useMemo(() => {
+  const { displayName, allSets, byDate, record, best1RM, volumeTotal, bodyweight } = useMemo(() => {
     const sets: HistorySet[] = []
     const nameCounts = new Map<string, number>()
     let bodyweight = false
@@ -45,35 +39,31 @@ export function ExerciseHistoryPage() {
         if (normalizeExerciseName(ex.name) !== normKey) continue
         nameCounts.set(ex.name, (nameCounts.get(ex.name) ?? 0) + 1)
         if (ex.bodyweight) bodyweight = true
-        for (const set of ex.sets) {
-          sets.push({ ...set, sessionId: s.id, date: s.date })
-        }
+        for (const set of ex.sets) sets.push({ ...set, sessionId: s.id, date: s.date })
       }
     }
-    // Sort chronologically
     sets.sort((a, b) => a.date.localeCompare(b.date))
-    // Display name = most frequent spelling
     let displayName = normKey
-    let best = 0
-    for (const [n, c] of nameCounts) if (c > best) { displayName = n; best = c }
-    // Daily max for chart
+    let top = 0
+    for (const [n, c] of nameCounts) if (c > top) { displayName = n; top = c }
     const byDateMap = new Map<string, { date: string; max: number; volume: number }>()
     for (const s of sets) {
       const row = byDateMap.get(s.date) ?? { date: s.date, max: 0, volume: 0 }
-      const peak = setMaxWeightKg(s)
-      if (peak > row.max) row.max = peak
+      row.max = Math.max(row.max, setMaxWeightKg(s))
       row.volume += setVolumeKg(s)
       byDateMap.set(s.date, row)
     }
     const byDate = [...byDateMap.values()].sort((a, b) => a.date.localeCompare(b.date))
     const record = sets.reduce((m, s) => Math.max(m, setMaxWeightKg(s)), 0)
+    // Estimated 1RM — only meaningful for loaded movements in a sane rep range.
+    const best1RM = bodyweight
+      ? 0
+      : sets.reduce((m, s) => (s.reps > 0 && s.reps <= 12 ? Math.max(m, estimate1RM(Number(s.weight), s.reps)) : m), 0)
     const volumeTotal = sets.reduce((v, s) => v + setVolumeKg(s), 0)
-    return { displayName, allSets: sets, byDate, record, volumeTotal, bodyweight }
+    return { displayName, allSets: sets, byDate, record, best1RM, volumeTotal, bodyweight }
   }, [sessions, normKey])
 
-  const chartData = useMemo(() => {
-    return byDate.map(d => ({ date: d.date, value: round(fromKg(d.max, unit), 1) }))
-  }, [byDate, unit])
+  const chartData = useMemo(() => byDate.map(d => ({ date: d.date, value: round(fromKg(d.max, unit), 1) })), [byDate, unit])
 
   const setsByDateDesc = useMemo(() => {
     const map = new Map<string, HistorySet[]>()
@@ -87,167 +77,155 @@ export function ExerciseHistoryPage() {
 
   if (loading) {
     return (
-      <div className="py-6">
-        <Skeleton className="h-10 w-40 mb-4" />
-        <Skeleton className="h-24 mb-4 rounded-2xl" />
-        <Skeleton className="h-48 rounded-2xl" />
-      </div>
+      <>
+        <PageHeader back kicker="Exercice" />
+        <Skeleton className="h-10 w-2/3 mb-6" />
+        <Skeleton className="h-24 mb-4 rounded-[var(--radius-card)]" />
+        <Skeleton className="h-56 rounded-[var(--radius-card)]" />
+      </>
     )
   }
 
   if (allSets.length === 0) {
     return (
-      <div className="py-6">
-        <header className="flex items-center gap-2 mb-6">
-          <Button variant="ghost" size="icon" onClick={() => nav(-1)} aria-label="Retour">
-            <ArrowLeft size={18} />
-          </Button>
-          <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium">Exercice</p>
-        </header>
-        <EmptyState title="Pas encore de série" subtitle="Cet exercice n'a pas encore de données." />
-      </div>
+      <>
+        <PageHeader back kicker="Exercice" title={displayName} />
+        <EmptyState title="Aucune série notée" subtitle="Ajoute cet exercice dans une séance et note une série : sa progression s’affichera ici." />
+      </>
     )
   }
 
+  const recordValue = record > 0 ? frNum(fromKg(record, unit), 1) : null
+  const totalReps = allSets.reduce((n, s) => n + setTotalReps(s), 0)
+  const vol = fromKg(volumeTotal, unit)
+
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4 }}
-      className="py-6"
-    >
-      <header className="flex items-center gap-2 mb-4">
-        <Button variant="ghost" size="icon" onClick={() => nav(-1)} aria-label="Retour">
-          <ArrowLeft size={18} />
-        </Button>
-        <div className="flex-1 min-w-0">
-          <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium">Exercice</p>
-          <div className="flex items-center gap-2 min-w-0">
-            <h1 className="font-display text-2xl tracking-tight truncate">{displayName}</h1>
-            {bodyweight && (
-              <span className="inline-flex items-center text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-semibold border border-[color:var(--color-border)] px-1.5 py-0.5 rounded-full shrink-0">
-                PDC
-              </span>
-            )}
-          </div>
-        </div>
-      </header>
+    <>
+      <PageHeader back kicker={bodyweight ? 'Exercice au poids du corps' : 'Exercice'} title={displayName} />
 
-      <div className="grid grid-cols-3 gap-2 mb-5">
-        <StatCell
-          label={bodyweight ? 'Lest max' : 'Record'}
-          value={record > 0 ? round(fromKg(record, unit), 1).toString() : (bodyweight ? '—' : '0')}
-          suffix={record > 0 ? unit : undefined}
-          icon={<TrendingUp size={12} />}
-        />
-        <StatCell label="Séries" value={String(allSets.length)} />
-        {bodyweight ? (
-          <StatCell label="Reps total" value={String(allSets.reduce((n, s) => n + setTotalReps(s), 0))} icon={<Flame size={12} />} />
+      <Card className="grid grid-cols-3 py-4">
+        <Stat label={bodyweight ? 'Lest max' : 'Record'} value={recordValue ? `${bodyweight ? '+' : ''}${recordValue}` : '–'} unit={recordValue ? unit : undefined} tone="pr" />
+        {best1RM > 0 ? (
+          <Stat label="1RM estimé" value={frNum(fromKg(best1RM, unit), 0)} unit={unit} />
         ) : (
-          <StatCell label="Volume" value={formatBigNum(fromKg(volumeTotal, unit))} suffix={unit} icon={<Flame size={12} />} />
+          <Stat label="Répétitions" value={String(totalReps)} />
         )}
-      </div>
-
-      {chartData.length >= 2 && (
-        <Card className="p-4 mb-6">
-          <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium mb-2">
-            Progression — poids max par jour
-          </p>
-          <div className="h-44 sm:h-56 lg:h-64 -mx-1">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="exercise-chart-grad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="var(--color-accent)" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="var(--color-accent)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="var(--color-border)" vertical={false} strokeDasharray="3 3" />
-                <XAxis dataKey="date" tickFormatter={d => format(parseISO(d), 'd MMM', { locale: fr })} stroke="var(--color-text-dim)" fontSize={11} tickMargin={8} />
-                <YAxis stroke="var(--color-text-dim)" fontSize={11} width={32} domain={['dataMin - 2', 'dataMax + 2']} />
-                <RechartsTooltip
-                  contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 12, fontSize: 12, fontFamily: 'var(--font-mono)' }}
-                  labelFormatter={d => format(parseISO(d as string), 'd MMM yyyy', { locale: fr })}
-                  formatter={v => [`${v} ${unit}`, 'Max']}
-                />
-                <Area type="monotone" dataKey="value" stroke="var(--color-accent)" strokeWidth={2.5} fill="url(#exercise-chart-grad)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
+        {bodyweight ? (
+          <Stat label="Séries" value={String(allSets.length)} />
+        ) : (
+          <Stat label="Volume total" value={vol >= 1000 ? frNum(vol / 1000, 1) : String(Math.round(vol))} unit={vol >= 1000 ? (unit === 'kg' ? 't' : 'k lb') : unit} />
+        )}
+      </Card>
+      {best1RM > 0 && (
+        <p className="text-[12px] text-faint mt-2 px-1">1RM estimé avec la formule de Brzycki, à partir de ta meilleure série de 12 reps ou moins.</p>
       )}
 
-      <p className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium mb-3 px-1">
-        Toutes les séries
-      </p>
-      <div className="space-y-3">
-        {setsByDateDesc.map(([date, sets]) => (
-          <Card key={date} className="p-4">
-            <button
-              onClick={() => nav(`/session/${sets[0].sessionId}`)}
-              className="text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium mb-2 hover:text-[color:var(--color-accent)] transition-colors cursor-pointer capitalize"
-            >
-              {format(parseISO(date), 'EEEE d MMMM yyyy', { locale: fr })} → ouvrir la séance
-            </button>
-            <div className="space-y-1">
-              {sets.map((s, i) => (
-                <div key={s.id}>
-                  <div className="grid grid-cols-[2rem_1fr_1fr] items-center gap-2 py-1 text-sm">
-                    <span className="text-[10px] font-mono tabular text-[color:var(--color-text-dim)] text-center">{String(i + 1).padStart(2, '0')}</span>
-                    <span className="font-display tabular text-center">{s.reps}</span>
-                    <span className="font-display tabular text-center">
-                      {bodyweight && Number(s.weight) <= 0 ? (
-                        <span className="text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-semibold">PDC</span>
-                      ) : (
-                        <>
-                          {bodyweight ? '+' : ''}{round(fromKg(Number(s.weight), unit), 1)}
-                          <span className="text-[10px] text-[color:var(--color-text-dim)] ml-1">{unit}</span>
-                        </>
-                      )}
-                    </span>
-                  </div>
-                  {s.drops?.map(d => (
-                    <div key={d.id} className="grid grid-cols-[2rem_1fr_1fr] items-center gap-2 py-0.5 text-xs text-[color:var(--color-text-dim)]">
-                      <span className="text-[9px] font-mono tabular text-center">↳</span>
-                      <span className="font-display tabular text-center">{d.reps}</span>
-                      <span className="font-display tabular text-center">
-                        {bodyweight && Number(d.weight) <= 0 ? (
-                          <span className="text-[9px] uppercase tracking-widest font-semibold">PDC</span>
-                        ) : (
-                          <>
-                            {bodyweight ? '+' : ''}{round(fromKg(Number(d.weight), unit), 1)}
-                            <span className="text-[9px] ml-1">{unit}</span>
-                          </>
-                        )}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ))}
+      {chartData.length >= 2 && (
+        <section className="mt-8">
+          <SectionTitle>Charge max par séance</SectionTitle>
+          <Card className="p-4 sm:p-5">
+            <div className="h-48 sm:h-56 -ml-2 -mr-1">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="liftFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--color-lift)" stopOpacity={0.25} />
+                      <stop offset="100%" stopColor="var(--color-lift)" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="var(--color-line)" vertical={false} />
+                  <XAxis dataKey="date" tickFormatter={d => format(parseISO(d), 'd MMM', { locale: fr })} minTickGap={24} tickMargin={8} stroke="var(--color-faint)" fontSize={11} tickLine={false} axisLine={false} />
+                  <YAxis width={34} domain={['dataMin - 2', 'dataMax + 2']} tickFormatter={v => frNum(Number(v), 0)} stroke="var(--color-faint)" fontSize={11} tickLine={false} axisLine={false} />
+                  <Tooltip
+                    contentStyle={{ background: 'var(--color-surface-2)', border: 'none', borderRadius: 12, fontSize: 13, color: 'var(--color-ink)' }}
+                    cursor={{ stroke: 'var(--color-line-strong)' }}
+                    labelFormatter={d => format(parseISO(d as string), 'EEEE d MMMM', { locale: fr })}
+                    formatter={v => [`${frNum(Number(v), 1)} ${unit}`, 'Charge max']}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="value"
+                    stroke="var(--color-lift)"
+                    strokeWidth={2.5}
+                    fill="url(#liftFill)"
+                    dot={(p: { cx?: number; cy?: number; payload?: { value: number }; index?: number }) => {
+                      const isRecord = recordValue !== null && p.payload && p.payload.value === round(fromKg(record, unit), 1)
+                      return (
+                        <circle
+                          key={p.index}
+                          cx={p.cx}
+                          cy={p.cy}
+                          r={isRecord ? 5 : 0}
+                          fill="var(--color-pr)"
+                          stroke="var(--color-surface)"
+                          strokeWidth={2}
+                        />
+                      )
+                    }}
+                    activeDot={{ r: 5, strokeWidth: 0, fill: 'var(--color-lift)' }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
             </div>
+            <p className="text-[12px] text-dim mt-2 flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-pr" /> Record</p>
           </Card>
-        ))}
-      </div>
-    </motion.div>
+        </section>
+      )}
+
+      <section className="mt-8">
+        <SectionTitle>Toutes les séances</SectionTitle>
+        <div className="grid gap-3 lg:grid-cols-2 items-start">
+          {setsByDateDesc.map(([date, sets]) => {
+            const dayMax = sets.reduce((m, s) => Math.max(m, setMaxWeightKg(s)), 0)
+            const hasRecord = record > 0 && dayMax === record
+            return (
+              <Card key={date} className="overflow-hidden">
+                <button
+                  onClick={() => nav(`/session/${sets[0].sessionId}`)}
+                  className="w-full flex items-center gap-2 px-4 pt-3.5 pb-2 text-left cursor-pointer"
+                >
+                  <span className="font-semibold first-letter:uppercase">{format(parseISO(date), 'EEEE d MMMM yyyy', { locale: fr })}</span>
+                  {hasRecord && <Tag tone="pr">Record</Tag>}
+                  <ChevronRight size={18} className="text-faint ml-auto" />
+                </button>
+                <div className="flex flex-wrap gap-1.5 px-4 pb-4">
+                  {sets.map(s => {
+                    const top = record > 0 && setMaxWeightKg(s) === record
+                    return (
+                      <span
+                        key={s.id}
+                        className={cn(
+                          'rounded-[10px] px-2.5 h-9 flex items-center gap-1 num text-[18px]',
+                          top ? 'bg-pr/15 text-pr' : 'bg-surface-2',
+                        )}
+                      >
+                        {s.reps}×{bodyweight && Number(s.weight) <= 0 ? 'PDC' : `${bodyweight ? '+' : ''}${frNum(fromKg(Number(s.weight), unit), 1)}`}
+                        {s.drops?.map(d => (
+                          <span key={d.id} className="text-dim">
+                            {' → '}{d.reps}×{bodyweight && Number(d.weight) <= 0 ? 'PDC' : frNum(fromKg(Number(d.weight), unit), 1)}
+                          </span>
+                        ))}
+                      </span>
+                    )
+                  })}
+                </div>
+              </Card>
+            )
+          })}
+        </div>
+      </section>
+    </>
   )
 }
 
-function StatCell({ label, value, suffix, icon }: { label: string; value: string; suffix?: string; icon?: React.ReactNode }) {
+function Stat({ label, value, unit, tone }: { label: string; value: string; unit?: string; tone?: 'pr' }) {
   return (
-    <Card className="p-3">
-      <p className="text-[9px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium flex items-center gap-1">
-        {icon}
-        {label}
+    <div className="text-center px-1">
+      <p className="flex items-baseline justify-center gap-0.5">
+        <span className={cn('num text-[32px]', tone === 'pr' && 'text-pr')}>{value}</span>
+        {unit && <span className="text-[12px] font-semibold text-dim">{unit}</span>}
       </p>
-      <p className="font-display tabular text-lg leading-tight mt-0.5">
-        {value}
-        {suffix && <span className="text-[color:var(--color-text-dim)] text-[10px] ml-0.5">{suffix}</span>}
-      </p>
-    </Card>
+      <p className="text-[12px] text-faint mt-1">{label}</p>
+    </div>
   )
-}
-
-function formatBigNum(v: number): string {
-  if (v >= 1000) return `${Math.round((v / 1000) * 10) / 10}k`
-  return String(Math.round(v))
 }

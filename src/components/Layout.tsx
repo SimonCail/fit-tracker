@@ -1,161 +1,186 @@
-import { useState } from 'react'
-import { Link, Outlet, useLocation } from 'react-router-dom'
-import { Settings, Dumbbell, LineChart, Clock, Library } from 'lucide-react'
+import { useMemo, useState, type ReactNode } from 'react'
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { ChevronLeft, House, BookOpen, TrendingUp, Dumbbell, Plus, Settings } from 'lucide-react'
 import { motion } from 'framer-motion'
-import { Button, Tooltip, TooltipContent, TooltipTrigger } from './ui'
+import { Button, Disc } from './ui'
 import { SettingsSheet } from './Settings'
+import { NewSessionSheet } from './NewSessionSheet'
+import { SyncNotice } from './SyncNotice'
+import { LayoutCtx, useLayout } from './layoutContext'
 import { cn } from '../lib/cn'
+
+const TABS = [
+  { to: '/', label: 'Accueil', icon: House, end: true },
+  { to: '/history', label: 'Journal', icon: BookOpen },
+  { to: '/evolution', label: 'Progrès', icon: TrendingUp },
+  { to: '/exercises', label: 'Exercices', icon: Dumbbell },
+] as const
 
 export function Layout() {
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [newOpen, setNewOpen] = useState(false)
   const loc = useLocation()
+  // Inside a session the tab bar steps aside: the screen is for logging sets.
+  const focusMode = loc.pathname.startsWith('/session/')
 
-  const tabs = [
-    { to: '/', label: "Aujourd'hui", end: true },
-    { to: '/history', label: 'Historique' },
-    { to: '/evolution', label: 'Évolution' },
-    { to: '/exercises', label: 'Exos' },
-  ]
+  const actions = useMemo(
+    () => ({ openSettings: () => setSettingsOpen(true), openNewSession: () => setNewOpen(true) }),
+    [],
+  )
 
   return (
-    <div className="min-h-[100dvh] flex flex-col">
-      {/* Top bar: desktop only (sm+). On mobile we use a bottom tab bar exclusively. */}
-      <div className="sticky top-0 z-30 pointer-events-none hidden sm:block">
-        <div className="safe-top pt-3 pb-3 px-3">
-          <div className="max-w-xl md:max-w-2xl mx-auto pointer-events-auto">
-            <div className="liquid-glass rounded-full pl-3 pr-2 h-14 flex items-center gap-2">
-              <Link to="/" className="flex items-center gap-2 group shrink-0">
-                <img
-                  src="/favicon.svg"
-                  alt=""
-                  aria-hidden="true"
-                  className="w-8 h-8 rounded-xl group-hover:rotate-[-8deg] transition-transform duration-300"
-                />
-                <span className="font-display text-lg tracking-tight">Fit</span>
-              </Link>
-              <nav className="flex-1 flex justify-center">
-                <div className="relative inline-flex items-center p-1">
-                  {tabs.map(t => {
-                    const active = t.end ? loc.pathname === t.to : loc.pathname.startsWith(t.to)
-                    return (
-                      <Link
-                        key={t.to}
-                        to={t.to}
-                        className={cn(
-                          'relative px-3.5 h-8 flex items-center rounded-full text-xs font-medium transition-colors whitespace-nowrap',
-                          active
-                            ? 'text-[color:var(--color-text)]'
-                            : 'text-[color:var(--color-text-dim)] hover:text-[color:var(--color-text)]',
-                        )}
-                      >
-                        {active && (
-                          <motion.div
-                            layoutId="active-tab"
-                            className="absolute inset-0 bg-[color:var(--color-surface-2)] rounded-full shadow-[inset_0_1px_0_color-mix(in_srgb,var(--color-text)_12%,transparent)]"
-                            transition={{ type: 'spring', stiffness: 400, damping: 32 }}
-                          />
-                        )}
-                        <span className="relative z-10">{t.label}</span>
-                      </Link>
-                    )
-                  })}
-                </div>
-              </nav>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)} aria-label="Réglages" className="shrink-0">
-                    <Settings size={18} />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Réglages</TooltipContent>
-              </Tooltip>
-            </div>
-          </div>
-        </div>
+    <LayoutCtx.Provider value={actions}>
+      <div className="min-h-[100dvh] flex flex-col">
+        <DesktopBar pathname={loc.pathname} />
+
+        <main
+          className={cn(
+            'flex-1 w-full mx-auto max-w-xl md:max-w-2xl lg:max-w-none px-4 sm:px-6 lg:px-10 xl:px-14',
+            focusMode ? 'pb-10' : 'pb-[calc(env(safe-area-inset-bottom)+6.5rem)] sm:pb-14',
+          )}
+        >
+          <Outlet />
+        </main>
+
+        {!focusMode && <MobileTabBar pathname={loc.pathname} onNew={() => setNewOpen(true)} />}
+
+        <SyncNotice raised={!focusMode} top={focusMode} />
+        <SettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} />
+        <NewSessionSheet open={newOpen} onOpenChange={setNewOpen} />
       </div>
-
-      {/* Mobile-only top header: compact liquid-glass pill with brand, mirrors the bottom tab bar. */}
-      <MobileTopHeader onSettingsClick={() => setSettingsOpen(true)} />
-
-      <main className="flex-1 w-full mx-auto max-w-xl md:max-w-2xl lg:max-w-3xl px-4 sm:px-6 pb-28 sm:pb-10 pt-2 sm:pt-0">
-        <Outlet />
-      </main>
-
-      <SettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} />
-      <MobileTabBar loc={loc.pathname} />
-    </div>
+    </LayoutCtx.Provider>
   )
 }
 
-function MobileTopHeader({ onSettingsClick }: { onSettingsClick: () => void }) {
+function isActive(pathname: string, to: string, end?: boolean) {
+  return end ? pathname === to : pathname.startsWith(to)
+}
+
+function DesktopBar({ pathname }: { pathname: string }) {
+  const { openSettings, openNewSession } = useLayout()
   return (
-    <header className="sm:hidden sticky top-0 z-30 pointer-events-none">
-      <div className="safe-top pt-2 pb-2 px-4">
-        <div className="max-w-xl mx-auto pointer-events-auto">
-          <div className="liquid-glass rounded-full h-11 pl-2.5 pr-2 flex items-center gap-2">
-            <Link to="/" className="flex items-center gap-2 group shrink-0">
-              <img
-                src="/favicon.svg"
-                alt=""
-                aria-hidden="true"
-                className="w-7 h-7 rounded-xl"
-              />
-              <span className="font-display text-base tracking-tight">Fit</span>
-            </Link>
-            <div className="flex-1" />
-            <button
-              onClick={onSettingsClick}
-              aria-label="Réglages"
-              className="w-8 h-8 flex items-center justify-center rounded-full text-[color:var(--color-text-dim)] hover:text-[color:var(--color-text)] active:bg-[color:var(--color-surface-2)] transition-colors cursor-pointer shrink-0"
-            >
-              <Settings size={16} />
-            </button>
-          </div>
-        </div>
+    <header className="hidden sm:block sticky top-0 z-30 bar hairline-b safe-top">
+      <div className="max-w-2xl lg:max-w-none mx-auto px-6 lg:px-10 xl:px-14 h-16 flex items-center gap-6">
+        <Link to="/" className="flex items-center gap-2 shrink-0" aria-label="Accueil">
+          <Disc size={22} />
+          <span className="t-heading text-[18px]">Fit</span>
+        </Link>
+        <nav className="flex-1 flex items-center gap-1">
+          {TABS.map(t => {
+            const active = isActive(pathname, t.to, 'end' in t ? t.end : false)
+            return (
+              <Link
+                key={t.to}
+                to={t.to}
+                aria-current={active ? 'page' : undefined}
+                className={cn(
+                  'relative h-16 px-3 flex items-center text-[14px] font-semibold transition-colors',
+                  active ? 'text-ink' : 'text-dim hover:text-ink',
+                )}
+              >
+                {t.label}
+                {active && (
+                  <motion.span
+                    layoutId="desktop-tab"
+                    className="absolute left-3 right-3 bottom-0 h-[2px] bg-ink"
+                    transition={{ type: 'spring', stiffness: 500, damping: 40 }}
+                  />
+                )}
+              </Link>
+            )
+          })}
+        </nav>
+        <Button size="sm" onClick={openNewSession}>
+          <Plus size={16} strokeWidth={2.5} /> Séance
+        </Button>
+        <Button variant="ghost" size="icon-sm" onClick={openSettings} aria-label="Réglages">
+          <Settings size={18} />
+        </Button>
       </div>
     </header>
   )
 }
 
-function MobileTabBar({ loc }: { loc: string }) {
-  const tabs = [
-    { to: '/', icon: Clock, end: true, label: "Aujourd'hui" },
-    { to: '/history', icon: Dumbbell, label: 'Historique' },
-    { to: '/evolution', icon: LineChart, label: 'Évolution' },
-    { to: '/exercises', icon: Library, label: 'Exos' },
-  ]
+function MobileTabBar({ pathname, onNew }: { pathname: string; onNew: () => void }) {
+  const [left, right] = [TABS.slice(0, 2), TABS.slice(2)]
   return (
-    <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-20 pointer-events-none">
-      <div className="max-w-xl mx-auto px-4 pb-[max(env(safe-area-inset-bottom),0.75rem)] pointer-events-auto">
-        <div className="liquid-glass rounded-full flex items-center justify-around p-1 h-14 relative">
-          {tabs.map(({ to, icon: Icon, end, label }) => {
-            const active = end ? loc === to : loc.startsWith(to)
-            return (
-              <Link
-                key={to}
-                to={to}
-                aria-label={label}
-                className="relative flex-1 h-12 flex items-center justify-center rounded-full transition-colors"
-              >
-                {active && (
-                  <motion.div
-                    layoutId="active-mobile-tab"
-                    className="absolute inset-0 bg-[color:var(--color-text)] rounded-full shadow-lg"
-                    transition={{ type: 'spring', stiffness: 380, damping: 32 }}
-                  />
-                )}
-                <Icon
-                  size={18}
-                  className={cn(
-                    'relative z-10 transition-colors',
-                    active ? 'text-[color:var(--color-bg)]' : 'text-[color:var(--color-text-dim)]',
-                  )}
-                />
-              </Link>
-            )
-          })}
+    <nav
+      aria-label="Navigation principale"
+      className="sm:hidden fixed bottom-0 inset-x-0 z-30 bar hairline-t pb-safe"
+    >
+      <div className="grid grid-cols-5 items-stretch h-[62px] max-w-xl mx-auto">
+        {left.map(t => <TabLink key={t.to} tab={t} pathname={pathname} />)}
+        <div className="flex items-center justify-center">
+          <button
+            onClick={onNew}
+            aria-label="Nouvelle séance"
+            className="h-12 w-12 rounded-full bg-ink text-bg grid place-items-center active:scale-95 transition-transform cursor-pointer"
+          >
+            <Plus size={24} strokeWidth={2.5} />
+          </button>
         </div>
+        {right.map(t => <TabLink key={t.to} tab={t} pathname={pathname} />)}
       </div>
     </nav>
+  )
+}
+
+function TabLink({ tab, pathname }: { tab: (typeof TABS)[number]; pathname: string }) {
+  const active = isActive(pathname, tab.to, 'end' in tab ? tab.end : false)
+  const Icon = tab.icon
+  return (
+    <Link
+      to={tab.to}
+      aria-current={active ? 'page' : undefined}
+      className={cn(
+        'flex flex-col items-center justify-center gap-1 transition-colors',
+        active ? 'text-ink' : 'text-faint active:text-dim',
+      )}
+    >
+      <Icon size={22} strokeWidth={active ? 2.4 : 1.8} />
+      <span className={cn('text-[11px] leading-none', active ? 'font-bold' : 'font-medium')}>{tab.label}</span>
+    </Link>
+  )
+}
+
+/**
+ * Page header. Mobile shows the settings button on top-level pages (desktop has it in the bar).
+ * `back` replaces it with a back arrow for detail pages.
+ */
+export function PageHeader({
+  title,
+  kicker,
+  back,
+  actions,
+  className,
+}: {
+  title?: ReactNode
+  kicker?: ReactNode
+  back?: boolean
+  actions?: ReactNode
+  className?: string
+}) {
+  const nav = useNavigate()
+  const { openSettings } = useLayout()
+  return (
+    <header className={cn('pt-[calc(env(safe-area-inset-top)+0.75rem)] sm:pt-8 pb-5', className)}>
+      <div className="flex items-center gap-2 min-h-11 -mx-1.5">
+        {back ? (
+          <Button variant="ghost" size="icon" onClick={() => nav(-1)} aria-label="Retour" className="text-ink">
+            <ChevronLeft size={24} />
+          </Button>
+        ) : null}
+        <div className="flex-1 min-w-0 px-1.5">
+          {kicker && <p className="text-[14px] text-dim font-medium first-letter:uppercase truncate">{kicker}</p>}
+        </div>
+        {actions}
+        {!back && (
+          <Button variant="ghost" size="icon" onClick={openSettings} aria-label="Réglages" className="sm:hidden">
+            <Settings size={21} />
+          </Button>
+        )}
+      </div>
+      {title && <h1 className="t-title text-[36px] sm:text-[44px] mt-1 break-words">{title}</h1>}
+    </header>
   )
 }

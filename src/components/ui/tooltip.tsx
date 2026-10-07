@@ -2,7 +2,7 @@ import { forwardRef, type ComponentPropsWithoutRef, type ElementRef, type ReactN
 import * as TooltipPrimitive from '@radix-ui/react-tooltip'
 import { cn } from '../../lib/cn'
 
-export function TooltipProvider({ children, delayDuration = 120 }: { children: ReactNode; delayDuration?: number }) {
+export function TooltipProvider({ children, delayDuration = 300 }: { children: ReactNode; delayDuration?: number }) {
   return <TooltipPrimitive.Provider delayDuration={delayDuration}>{children}</TooltipPrimitive.Provider>
 }
 
@@ -18,7 +18,7 @@ export const TooltipContent = forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        'z-50 rounded-lg bg-[color:var(--color-surface-2)] text-[color:var(--color-text)] border border-[color:var(--color-border)] px-2.5 py-1.5 text-xs font-medium shadow-xl data-[state=delayed-open]:animate-modal-in data-[state=closed]:animate-modal-out pointer-events-none',
+        'z-50 hidden sm:block rounded-lg bg-ink text-bg px-2.5 py-1.5 text-xs font-medium animate-fade-in pointer-events-none',
         className,
       )}
       {...props}

@@ -6,11 +6,10 @@ import {
   signInWithEmailAndPassword,
   signInWithPopup,
 } from 'firebase/auth'
-import { ArrowRight, CalendarDays, Flame, Lock, Mail, Scale, Timer, Zap } from 'lucide-react'
+import { ChevronLeft, Mail } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { auth, isConfigured } from '../lib/firebase'
-import { Button, Input } from '../components/ui'
-import { cn } from '../lib/cn'
+import { Button, Input, Label } from '../components/ui'
 
 type Mode = 'choose' | 'email'
 
@@ -53,13 +52,13 @@ export function Login() {
     setError(null)
     setInfo(null)
     if (!email) {
-      setError('Tape ton email d\'abord, puis clique sur "Mot de passe oublié".')
+      setError('Indique ton e-mail ci-dessus, puis touche « Mot de passe oublié ».')
       return
     }
     setLoading(true)
     try {
       await sendPasswordResetEmail(auth, email)
-      setInfo(`Email envoyé à ${email}. Clique le lien pour définir un mot de passe — tes données restent intactes.`)
+      setInfo(`Lien envoyé à ${email}. Ouvre-le pour choisir un nouveau mot de passe ; tes données ne changent pas.`)
     } catch (e) {
       setError(humanAuthError(e))
     } finally {
@@ -68,304 +67,122 @@ export function Login() {
   }
 
   return (
-    <div className="relative h-[100dvh] flex flex-col overflow-hidden">
-      <GridPattern />
-      <BackgroundGlow />
+    <div className="relative min-h-[100dvh] flex flex-col overflow-hidden">
+      {/* The one bold gesture: a 20 kg plate rolling in from the corner. */}
+      <motion.svg
+        aria-hidden
+        viewBox="0 0 400 400"
+        initial={{ rotate: -50, x: 80, opacity: 0 }}
+        animate={{ rotate: 0, x: 0, opacity: 1 }}
+        transition={{ type: 'spring', stiffness: 60, damping: 16, mass: 1.2 }}
+        className="absolute -right-[38vw] -top-[22vw] w-[105vw] max-w-[620px] sm:-right-40 sm:-top-40"
+      >
+        <circle cx="200" cy="200" r="196" fill="var(--color-lift)" />
+        <circle cx="200" cy="200" r="150" fill="none" stroke="#000" strokeOpacity="0.2" strokeWidth="5" />
+        <circle cx="200" cy="200" r="118" fill="none" stroke="#000" strokeOpacity="0.12" strokeWidth="2" />
+        <circle cx="200" cy="200" r="38" fill="#000" fillOpacity="0.18" />
+        <circle cx="200" cy="200" r="26" fill="var(--color-bg)" />
+        <text x="200" y="322" textAnchor="middle" fill="#fff" fillOpacity="0.9" fontFamily="Big Shoulders Variable" fontWeight="800" fontSize="40">
+          20 KG
+        </text>
+      </motion.svg>
 
-      <div className="flex-1 min-h-0 flex flex-col justify-center max-w-md mx-auto w-full px-5 relative z-10 safe-top safe-bottom py-4 gap-5">
-        {/* Logo */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-          className="flex items-center gap-2 shrink-0"
-        >
-          <div className="relative">
-            <div className="absolute inset-0 rounded-lg bg-[color:var(--color-accent)] opacity-20 blur-md pulse-accent" />
-            <img
-              src="/favicon.svg"
-              alt=""
-              aria-hidden="true"
-              className="relative w-8 h-8 rounded-lg"
-            />
-          </div>
-          <span className="font-display text-lg tracking-tight">Fit Tracker</span>
-        </motion.div>
+      <div className="relative z-10 flex-1 flex flex-col max-w-md w-full mx-auto px-6 pt-[calc(env(safe-area-inset-top)+1.25rem)] pb-[calc(env(safe-area-inset-bottom)+1.5rem)]">
+        <p className="t-heading text-[20px]">Fit</p>
 
-        {/* Hero — compact */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}
-        >
-          <p className="text-[10px] uppercase tracking-[0.22em] text-[color:var(--color-text-dim)] font-semibold mb-3 flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[color:var(--color-accent-soft)] text-[color:var(--color-accent)]">
-              <span className="w-1 h-1 rounded-full bg-[color:var(--color-accent)] pulse-accent" />
-              Nouveau
-            </span>
-            <span>App de muscu · PWA</span>
+        <div className="mt-auto pt-56 sm:pt-48">
+          <h1 className="t-title text-[36px] min-[400px]:text-[40px] sm:text-[52px]">Ton carnet d’entraînement.</h1>
+          <p className="text-[16px] text-dim mt-3 max-w-[34ch]">
+            Séries, charges, pesées et sorties de course au même endroit. Tu vois ce qui progresse, séance après séance.
           </p>
-          <h1 className="font-display text-[2.4rem] sm:text-5xl leading-[0.92] tracking-tight">
-            Lève plus.<br />
-            <span className="relative inline-block">
-              <span className="relative z-10 text-[color:var(--color-accent)]">Vois tout.</span>
-              <span className="absolute left-0 right-0 bottom-1 h-2 bg-[color:var(--color-accent)]/20 -skew-x-6" aria-hidden />
-            </span>
-          </h1>
-          <p className="text-[color:var(--color-text-dim)] text-sm mt-3 leading-snug">
-            Tes séries, ton poids, ton streak. Rappels intelligents. Pas de tableur, pas de pub.
-          </p>
-        </motion.div>
+        </div>
 
-        {/* 3 feature mini-cards, single row */}
-        <motion.div
-          initial="hidden"
-          animate="show"
-          variants={{ show: { transition: { staggerChildren: 0.07, delayChildren: 0.2 } } }}
-          className="grid grid-cols-3 gap-2"
-        >
-          <FeatureCard icon={<CalendarDays size={13} />} label="Planning">
-            <div className="flex gap-0.5">
-              {[0, 1, 2, 3, 4].map(i => (
-                <div
-                  key={i}
-                  className={cn(
-                    'flex-1 h-1.5 rounded-full',
-                    [1, 3].includes(i) ? 'bg-[color:var(--color-accent)]' : 'bg-[color:var(--color-surface-2)]',
-                  )}
-                />
-              ))}
-            </div>
-          </FeatureCard>
-          <FeatureCard icon={<Flame size={13} />} label="Streak">
-            <p className="font-display text-lg tabular text-[color:var(--color-accent)] leading-none">17<span className="text-[9px] text-[color:var(--color-text-dim)] font-sans ml-1">j</span></p>
-          </FeatureCard>
-          <FeatureCard icon={<Timer size={13} />} label="Repos">
-            <p className="font-mono text-sm tabular font-semibold leading-none">01:30</p>
-          </FeatureCard>
-        </motion.div>
+        <div className="mt-8 space-y-3">
+          {!isConfigured && (
+            <Note tone="error" text="Firebase n’est pas configuré : renseigne les variables dans .env.local." />
+          )}
+          {error && <Note tone="error" text={error} />}
+          {info && <Note tone="info" text={info} />}
 
-        {!isConfigured && (
-          <div className="rounded-2xl p-3 mb-3 bg-[color:var(--color-danger)]/10 border border-[color:var(--color-danger)]/30 text-xs shrink-0">
-            <p className="font-medium text-[color:var(--color-danger)] mb-0.5">Configuration manquante</p>
-            <p className="text-[color:var(--color-text-dim)]">Remplis <code className="text-xs">.env.local</code>.</p>
-          </div>
-        )}
-
-        {error && (
-          <motion.div
-            initial={{ opacity: 0, y: -4 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="rounded-2xl p-2.5 mb-3 bg-[color:var(--color-danger)]/10 border border-[color:var(--color-danger)]/30 text-xs shrink-0"
-          >
-            <p className="text-[color:var(--color-danger)] break-words">{error}</p>
-          </motion.div>
-        )}
-
-        {info && (
-          <motion.div
-            initial={{ opacity: 0, y: -4 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="rounded-2xl p-2.5 mb-3 bg-[color:var(--color-accent-soft)] border border-[color:var(--color-accent)]/30 text-xs shrink-0"
-          >
-            <p className="text-[color:var(--color-accent)] break-words">{info}</p>
-          </motion.div>
-        )}
-
-        {/* Auth CTAs */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4, duration: 0.4 }}
-          className="shrink-0"
-        >
           {mode === 'choose' ? (
-            <div className="space-y-2">
-              <Button
-                onClick={onGoogle}
-                disabled={loading}
-                variant="accent"
-                size="lg"
-                className="w-full justify-center gap-3 h-13 text-[15px] group relative overflow-hidden"
-              >
-                <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700" />
-                <GoogleIcon size={18} />
-                <span className="relative">Continuer avec Google</span>
-                <ArrowRight size={15} className="opacity-70 relative group-hover:translate-x-0.5 transition-transform" />
+            <div className="space-y-2.5">
+              <Button onClick={onGoogle} disabled={loading} size="lg" className="w-full bg-ink text-bg hover:brightness-100 hover:opacity-90">
+                <GoogleIcon size={20} />
+                Continuer avec Google
               </Button>
-              <Button
-                onClick={() => setMode('email')}
-                disabled={loading}
-                variant="secondary"
-                size="md"
-                className="w-full justify-center gap-2"
-              >
-                <Mail size={14} />
-                Continuer avec un email
+              <Button onClick={() => setMode('email')} disabled={loading} variant="secondary" size="lg" className="w-full">
+                <Mail size={18} />
+                Continuer avec un e-mail
               </Button>
             </div>
           ) : (
-            <form onSubmit={e => onEmailPassword(e, false)} className="space-y-2">
-              <Input
-                type="email"
-                placeholder="ton@email.com"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
-                autoComplete="email"
-                inputMode="email"
-                className="h-11"
-              />
-              <Input
-                type="password"
-                placeholder="Mot de passe"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
-                autoComplete="current-password"
-                minLength={6}
-                className="h-11"
-              />
-              <div className="grid grid-cols-2 gap-2">
-                <Button type="submit" variant="accent" disabled={loading || !email || !password}>
-                  {loading ? '…' : 'Se connecter'}
-                </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={e => onEmailPassword(e, true)}
-                  disabled={loading || !email || !password}
-                >
-                  Créer
-                </Button>
+            <form onSubmit={e => onEmailPassword(e, false)} className="space-y-3">
+              <div>
+                <Label htmlFor="email" className="block mb-1.5">E-mail</Label>
+                <Input id="email" type="email" placeholder="toi@exemple.fr" value={email} onChange={e => setEmail(e.target.value)} required autoComplete="email" inputMode="email" />
               </div>
-              <button
-                type="button"
-                onClick={onResetPassword}
-                disabled={loading}
-                className="w-full text-xs text-[color:var(--color-text-dim)] hover:text-[color:var(--color-accent)] transition-colors py-1 cursor-pointer disabled:opacity-50"
-              >
-                Mot de passe oublié — recevoir un lien
-              </button>
-              <Button type="button" variant="ghost" onClick={() => setMode('choose')} className="w-full">
-                ← Retour
+              <div>
+                <Label htmlFor="password" className="block mb-1.5">Mot de passe</Label>
+                <Input id="password" type="password" placeholder="6 caractères minimum" value={password} onChange={e => setPassword(e.target.value)} required autoComplete="current-password" minLength={6} />
+              </div>
+              <Button type="submit" size="lg" className="w-full" disabled={loading || !email || !password}>
+                {loading ? 'Connexion…' : 'Se connecter'}
               </Button>
+              <div className="flex items-center justify-between text-[14px] font-semibold">
+                <button type="button" onClick={() => setMode('choose')} className="h-11 flex items-center gap-1 text-dim hover:text-ink cursor-pointer -ml-1">
+                  <ChevronLeft size={18} /> Retour
+                </button>
+                <button type="button" onClick={e => onEmailPassword(e as unknown as React.FormEvent, true)} disabled={loading || !email || !password} className="h-11 link disabled:opacity-40">
+                  Créer un compte
+                </button>
+              </div>
+              <button type="button" onClick={onResetPassword} disabled={loading} className="w-full h-10 text-[14px] text-dim hover:text-ink cursor-pointer disabled:opacity-50">
+                Mot de passe oublié
+              </button>
             </form>
           )}
-
-          {/* Trust chips in the same bottom area */}
-          <div className="flex items-center justify-center flex-wrap gap-x-3 gap-y-1 mt-4 text-[9px] uppercase tracking-[0.16em] text-[color:var(--color-text-dim)] font-medium">
-            <span className="flex items-center gap-1"><Lock size={9} /> Privé</span>
-            <span className="opacity-40">·</span>
-            <span className="flex items-center gap-1"><Zap size={9} /> Instant sync</span>
-            <span className="opacity-40">·</span>
-            <span className="flex items-center gap-1"><Scale size={9} /> kg / lb</span>
-          </div>
-        </motion.div>
+        </div>
       </div>
     </div>
   )
 }
 
-/**
- * Map Firebase auth error codes to readable French messages. Falls back to the raw message
- * so debugging info isn't lost.
- */
+function Note({ tone, text }: { tone: 'error' | 'info'; text: string }) {
+  return (
+    <motion.p
+      initial={{ opacity: 0, y: -4 }}
+      animate={{ opacity: 1, y: 0 }}
+      role={tone === 'error' ? 'alert' : 'status'}
+      className={tone === 'error' ? 'rounded-[10px] px-4 py-3 text-[14px] bg-danger/12 text-danger' : 'rounded-[10px] px-4 py-3 text-[14px] bg-surface-2 text-ink'}
+    >
+      {text}
+    </motion.p>
+  )
+}
+
+/** Firebase auth error codes → plain French. Falls back to the raw message. */
 function humanAuthError(e: unknown): string {
   const code = (e as { code?: string })?.code
   switch (code) {
-    case 'auth/invalid-email': return 'Adresse e-mail invalide.'
-    case 'auth/missing-password': return 'Mot de passe manquant.'
-    case 'auth/weak-password': return 'Mot de passe trop court (6 caractères minimum).'
-    case 'auth/email-already-in-use': return 'Un compte existe déjà avec cet e-mail.'
+    case 'auth/invalid-email': return 'Cette adresse e-mail n’est pas valide.'
+    case 'auth/missing-password': return 'Indique ton mot de passe.'
+    case 'auth/weak-password': return 'Mot de passe trop court : 6 caractères minimum.'
+    case 'auth/email-already-in-use': return 'Un compte existe déjà avec cet e-mail. Connecte-toi plutôt.'
     case 'auth/wrong-password':
     case 'auth/invalid-credential':
       return 'E-mail ou mot de passe incorrect.'
-    case 'auth/user-not-found': return 'Aucun compte avec cet e-mail.'
+    case 'auth/user-not-found': return 'Aucun compte avec cet e-mail. Touche « Créer un compte ».'
     case 'auth/too-many-requests': return 'Trop de tentatives. Réessaie dans quelques minutes.'
-    case 'auth/network-request-failed': return 'Pas de connexion réseau.'
-    case 'auth/unauthorized-domain': return 'Ce domaine n\'est pas autorisé dans Firebase Auth.'
-    case 'auth/popup-blocked': return 'Popup bloquée par le navigateur. Autorise les popups pour ce site, ou utilise email/mot de passe ci-dessous.'
+    case 'auth/network-request-failed': return 'Pas de connexion. Vérifie ton réseau et réessaie.'
+    case 'auth/unauthorized-domain': return 'Ce domaine n’est pas autorisé dans Firebase Auth.'
+    case 'auth/popup-blocked': return 'Le navigateur a bloqué la fenêtre Google. Autorise les pop-ups ou utilise ton e-mail.'
     case 'auth/popup-closed-by-user': return 'Connexion annulée.'
-    case 'auth/cancelled-popup-request': return 'Plusieurs popups ouvertes. Réessaie.'
-    case 'auth/web-storage-unsupported': return 'Stockage local désactivé. Active les cookies, ou utilise email/mot de passe.'
-    case 'auth/operation-not-supported-in-this-environment': return 'Connexion non supportée ici. Utilise email/mot de passe.'
+    case 'auth/cancelled-popup-request': return 'Plusieurs fenêtres de connexion ouvertes. Réessaie.'
+    case 'auth/web-storage-unsupported': return 'Le stockage local est désactivé. Active les cookies ou utilise ton e-mail.'
+    case 'auth/operation-not-supported-in-this-environment': return 'Connexion Google indisponible ici. Utilise ton e-mail.'
     default:
       return (e as Error)?.message ?? 'Erreur inconnue.'
   }
-}
-
-function FeatureCard({
-  icon,
-  label,
-  children,
-}: {
-  icon: React.ReactNode
-  label: string
-  children?: React.ReactNode
-}) {
-  return (
-    <motion.div
-      variants={{
-        hidden: { opacity: 0, y: 8 },
-        show: { opacity: 1, y: 0, transition: { duration: 0.35, ease: [0.16, 1, 0.3, 1] } },
-      }}
-      whileHover={{ y: -2 }}
-      className={cn(
-        'rounded-xl p-2.5 bg-[color:var(--color-surface)]/70 border border-[color:var(--color-border)] backdrop-blur-sm',
-        'hover:border-[color:var(--color-border-strong)] transition-colors',
-      )}
-    >
-      <div className="flex items-center gap-1.5 mb-2">
-        <span className="w-5 h-5 rounded bg-[color:var(--color-accent-soft)] text-[color:var(--color-accent)] flex items-center justify-center shrink-0">
-          {icon}
-        </span>
-        <span className="text-[10px] uppercase tracking-widest font-semibold text-[color:var(--color-text-dim)] truncate">{label}</span>
-      </div>
-      {children}
-    </motion.div>
-  )
-}
-
-function GridPattern() {
-  return (
-    <div
-      aria-hidden
-      className="absolute inset-0 opacity-[0.4] pointer-events-none z-0"
-      style={{
-        backgroundImage: `
-          linear-gradient(to right, var(--color-border) 1px, transparent 1px),
-          linear-gradient(to bottom, var(--color-border) 1px, transparent 1px)
-        `,
-        backgroundSize: '40px 40px',
-        maskImage: 'radial-gradient(ellipse 80% 50% at 50% 0%, #000 40%, transparent 90%)',
-        WebkitMaskImage: 'radial-gradient(ellipse 80% 50% at 50% 0%, #000 40%, transparent 90%)',
-      }}
-    />
-  )
-}
-
-function BackgroundGlow() {
-  return (
-    <>
-      <div
-        aria-hidden
-        className="absolute -top-32 -right-20 w-[400px] h-[400px] rounded-full opacity-40 pointer-events-none animate-[pulse_8s_ease-in-out_infinite]"
-        style={{
-          background: 'radial-gradient(circle, color-mix(in srgb, var(--color-accent) 50%, transparent), transparent 65%)',
-          filter: 'blur(70px)',
-        }}
-      />
-      <div
-        aria-hidden
-        className="absolute -bottom-32 -left-32 w-[400px] h-[400px] rounded-full opacity-20 pointer-events-none"
-        style={{
-          background: 'radial-gradient(circle, color-mix(in srgb, var(--color-accent) 30%, transparent), transparent 60%)',
-          filter: 'blur(90px)',
-        }}
-      />
-    </>
-  )
 }
 
 function GoogleIcon({ size = 16 }: { size?: number }) {

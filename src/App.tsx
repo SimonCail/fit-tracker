@@ -9,7 +9,8 @@ import { History } from './pages/History'
 import { Evolution } from './pages/Evolution'
 import { ExercisesPage } from './pages/Exercises'
 import { ExerciseHistoryPage } from './pages/ExerciseHistory'
-import { ConfirmProvider, Spinner, TooltipProvider } from './components/ui'
+import { RecordsPage } from './pages/Records'
+import { ConfirmProvider, Disc, TooltipProvider } from './components/ui'
 import { PwaUpdateBanner } from './components/PwaUpdateBanner'
 import { applyTheme, useSettings, watchSystemTheme } from './store/settings'
 import { deviceTimezone, readPrefs, writePrefs } from './lib/prefsSync'
@@ -27,7 +28,6 @@ function App() {
   useEffect(() => {
     if (!user) return
     let mounted = true
-    // Hydrate: read remote prefs first, merge into local store.
     readPrefs(user.uid)
       .then(remote => {
         if (!mounted || !remote) return
@@ -39,7 +39,6 @@ function App() {
       })
       .catch(e => console.warn('readPrefs failed', e))
 
-    // Subscribe: write to Firestore whenever plan/reminders change (debounced).
     let debounce: number | null = null
     const unsub = useSettings.subscribe(state => {
       if (debounce) window.clearTimeout(debounce)
@@ -60,8 +59,8 @@ function App() {
 
   if (loading) {
     return (
-      <div className="min-h-[100dvh] flex items-center justify-center">
-        <Spinner />
+      <div className="min-h-[100dvh] grid place-items-center" role="status" aria-label="Chargement">
+        <Disc size={40} className="animate-spin [animation-duration:1.4s]" />
       </div>
     )
   }
@@ -87,6 +86,7 @@ function App() {
               <Route path="evolution" element={<Evolution />} />
               <Route path="exercises" element={<ExercisesPage />} />
               <Route path="exercise/:slug" element={<ExerciseHistoryPage />} />
+              <Route path="records" element={<RecordsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>

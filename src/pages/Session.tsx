@@ -1,10 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Check, ChevronRight, Footprints, History, Plus, Timer, Trash2, Trophy } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Copy, Share, CornerDownRight, History, Plus, Timer, Trash2, X } from 'lucide-react'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
-import { AnimatePresence, motion } from 'framer-motion'
-import { Button, Card, EmptyState, Input, Label, Sheet, SheetBody, SheetContent, SheetHeader, Spinner, Tooltip, TooltipContent, TooltipTrigger, useConfirm } from '../components/ui'
+import { AnimatePresence, motion, useMotionValue, useTransform } from 'framer-motion'
+import {
+  Button,
+  Card,
+  Disc,
+  EmptyState,
+  Input,
+  Label,
+  Sheet,
+  SheetBody,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  Spinner,
+  Tag,
+  useConfirm,
+} from '../components/ui'
 import {
   addExercise,
   addSet,
@@ -15,6 +30,7 @@ import {
   deleteSetDrop,
   getDistinctExerciseNames,
   getSession,
+  insertSet,
   listSessions,
   updateRunningSession,
   updateSession,
@@ -22,13 +38,18 @@ import {
   updateSetDrop,
 } from '../lib/db'
 import type { Exercise, ExerciseSet, Session, SetDrop } from '../lib/types'
-import { formatWeight, fromKg, parseDecimal, round, toKg } from '../lib/units'
+import { frNum, fromKg, parseDecimal, round, toKg } from '../lib/units'
 import { normalizeExerciseName, slugifyExerciseName } from '../lib/exerciseName'
 import { buildPreviousPerformances, findLastSimilarSession } from '../lib/similarSession'
 import type { PreviousPerformance } from '../lib/similarSession'
 import { setMaxWeightKg, setTotalReps, setVolumeKg } from '../lib/setMath'
 import { useSettings } from '../store/settings'
 import { RestTimer } from '../components/RestTimer'
+import { PlateCalculator } from '../components/PlateCalculator'
+import { renderSessionImage, shareSessionImage } from '../lib/sessionImage'
+import { cn } from '../lib/cn'
+
+type Unit = 'kg' | 'lb'
 
 export function SessionPage() {
   const { id } = useParams<{ id: string }>()
@@ -45,25 +66,59 @@ export function SessionPage() {
   const [allSessions, setAllSessions] = useState<Session[]>([])
   const [prToast, setPrToast] = useState<{ name: string; weight: number; bodyweight: boolean } | null>(null)
   const notesTimer = useRef<number | null>(null)
+  const [undo, setUndo] = useState<{ exerciseId: string; set: ExerciseSet; position: number } | null>(null)
+  const undoTimer = useRef<number | null>(null)
+
+  function onSetRemoved(exerciseId: string, set: ExerciseSet, position: number) {
+    if (undoTimer.current) window.clearTimeout(undoTimer.current)
+    setUndo({ exerciseId, set, position })
+    undoTimer.current = window.setTimeout(() => setUndo(null), 5000)
+  }
+
+  const [sharing, setSharing] = useState(false)
+  async function onShare() {
+    if (!data) return
+    setSharing(true)
+    try {
+      // Exercises where this session beat everything logged before it.
+      const before: Record<string, number> = {}
+      for (const sess of allSessions) {
+        if (sess.id === data.id || sess.date > data.date) continue
+        for (const ex of sess.exercises) for (const st of ex.sets) before[ex.name.trim()] = Math.max(before[ex.name.trim()] ?? 0, setMaxWeightKg(st))
+      }
+      const recs = new Set<string>()
+      for (const ex of data.exercises) {
+        const best = ex.sets.reduce((m, st) => Math.max(m, setMaxWeightKg(st)), 0)
+        const prev = before[ex.name.trim()] ?? 0
+        if (prev > 0 && best > prev) recs.add(ex.name.trim())
+      }
+      const blob = await renderSessionImage(data, unit, recs)
+      await shareSessionImage(blob, data)
+    } finally {
+      setSharing(false)
+    }
+  }
+
+  async function restoreRemoved() {
+    if (!undo || !id) return
+    const u = undo
+    setUndo(null)
+    await insertSet(id, u.exerciseId, u.set, u.position)
+    await load()
+  }
 
   async function load() {
     if (!id) return
     const d = await getSession(id)
     setData(d)
-    setNotes(d?.notes ?? '')
     setLoading(false)
   }
 
-  // Initial load + build "past PR" map from all sessions except this one.
   useEffect(() => {
     if (!id) return
     setRecapOpen(false)
     ;(async () => {
-      const [d, all, names] = await Promise.all([
-        getSession(id),
-        listSessions(200),
-        getDistinctExerciseNames(),
-      ])
+      const [d, all, names] = await Promise.all([getSession(id), listSessions(200), getDistinctExerciseNames()])
       setData(d)
       setNotes(d?.notes ?? '')
       setExerciseNames(names)
@@ -83,13 +138,7 @@ export function SessionPage() {
     })()
   }, [id])
 
-  // The most recent past session sharing exercises with this one — used as a
-  // "same type" reference (e.g. last pecs session) without relying on its title.
-  const lastSimilar = useMemo(
-    () => (data ? findLastSimilarSession(data, allSessions) : null),
-    [data, allSessions],
-  )
-  // Per-exercise: what was logged the last time each exercise was done.
+  const lastSimilar = useMemo(() => (data ? findLastSimilarSession(data, allSessions) : null), [data, allSessions])
   const prevPerf = useMemo<Map<string, PreviousPerformance>>(
     () => (data ? buildPreviousPerformances(data, allSessions) : new Map()),
     [data, allSessions],
@@ -114,7 +163,7 @@ export function SessionPage() {
     if (!id) return
     const ok = await confirm({
       title: 'Supprimer cette séance ?',
-      description: 'Cette action est définitive. Tous les exercices et séries seront supprimés.',
+      description: 'Les exercices et toutes les séries enregistrées seront effacés. Impossible de revenir en arrière.',
       confirmLabel: 'Supprimer',
       danger: true,
     })
@@ -124,68 +173,69 @@ export function SessionPage() {
   }
 
   function onSetAdded(exerciseName: string, weightKg: number, bodyweight: boolean) {
-    const pr = pastPR[exerciseName.trim()] ?? 0
+    const key = exerciseName.trim()
+    const pr = pastPR[key] ?? 0
     if (weightKg > pr) {
-      setPastPR(prev => ({ ...prev, [exerciseName.trim()]: weightKg }))
-      setPrToast({ name: exerciseName, weight: weightKg, bodyweight })
-      window.setTimeout(() => setPrToast(null), 3500)
+      setPastPR(prev => ({ ...prev, [key]: weightKg }))
+      // Only celebrate when there was a previous best to beat.
+      if (pr > 0) {
+        if ('vibrate' in navigator) navigator.vibrate?.([30, 40, 30])
+        setPrToast({ name: exerciseName, weight: weightKg, bodyweight })
+        window.setTimeout(() => setPrToast(null), 3500)
+      }
     }
-    // Timer never auto-opens — user triggers it manually via the header button.
   }
 
-  if (loading) return <div className="flex justify-center py-20"><Spinner /></div>
-  if (!data || !id) return <EmptyState title="Séance introuvable" />
+  if (loading) return <div className="flex justify-center py-24"><Spinner /></div>
+  if (!data || !id) {
+    return (
+      <EmptyState
+        className="pt-24"
+        title="Séance introuvable"
+        subtitle="Elle a peut-être été supprimée depuis un autre appareil."
+        action={<Button onClick={() => nav('/')}>Retour à l’accueil</Button>}
+      />
+    )
+  }
+
+  const running = data.type === 'running'
 
   return (
-    <div className="py-6">
-      <header className="flex items-center gap-2 mb-6">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" onClick={() => nav(-1)} aria-label="Retour">
-              <ArrowLeft size={18} />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Retour</TooltipContent>
-        </Tooltip>
-        <div className="flex-1">
-          <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium capitalize">
-            {format(new Date(data.date), 'EEEE d MMMM', { locale: fr })}
+    <div className={cn(timerOpen && 'pb-28')}>
+      {/* Focus-mode top bar */}
+      <div className="sticky top-0 sm:top-16 z-20 -mx-4 sm:-mx-6 lg:-mx-10 xl:-mx-14 px-2 sm:px-4 lg:px-8 xl:px-12 bar hairline-b safe-top">
+        <div className="h-14 flex items-center gap-1">
+          <Button variant="ghost" size="icon" onClick={() => nav(-1)} aria-label="Retour" className="text-ink">
+            <ChevronLeft size={24} />
+          </Button>
+          {!running && <span className="w-11" aria-hidden />}
+          <p className="flex-1 min-w-0 text-center text-[15px] font-semibold first-letter:uppercase truncate">
+            {format(new Date(data.date + 'T12:00:00'), 'EEEE d MMMM', { locale: fr })}
           </p>
-        </div>
-        {data.type !== 'running' && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" onClick={() => setTimerOpen(true)} aria-label="Timer de repos">
-                <Timer size={18} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Timer de repos</TooltipContent>
-          </Tooltip>
-        )}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" onClick={onDeleteSession} aria-label="Supprimer la séance">
-              <Trash2 size={18} />
+          <Button variant="ghost" size="icon" onClick={onShare} disabled={sharing} aria-label="Partager la séance en image" className="text-ink">
+            <Share size={20} />
+          </Button>
+          {!running && (
+            <Button variant="ghost" size="icon" onClick={() => setTimerOpen(true)} aria-label="Minuteur de repos" className="text-ink">
+              <Timer size={21} />
             </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Supprimer</TooltipContent>
-        </Tooltip>
-      </header>
-
-      {data.type === 'running' && (
-        <div className="inline-flex items-center gap-2 mb-4 px-3 h-7 rounded-full bg-[color:var(--color-accent-soft)] text-[color:var(--color-accent)] text-[10px] uppercase tracking-widest font-semibold">
-          <Footprints size={12} /> Course
+          )}
         </div>
-      )}
+      </div>
 
-      <input
-        value={notes}
-        onChange={e => onNotesChange(e.target.value)}
-        placeholder={data.type === 'running' ? 'Titre (ex: Tour du parc)' : 'Titre de la séance'}
-        className="w-full bg-transparent font-display text-4xl sm:text-5xl leading-[1.05] tracking-tight placeholder:text-[color:var(--color-text-dim)]/50 focus:outline-none focus:caret-[color:var(--color-accent)] border-b-2 border-transparent hover:border-[color:var(--color-border)] focus:border-[color:var(--color-accent)]/60 transition-colors pb-1 mb-8 cursor-text"
-      />
+      <div className="pt-5">
+        {running && <Tag tone="run" className="mb-3">Course</Tag>}
+        <textarea
+          value={notes}
+          onChange={e => onNotesChange(e.target.value)}
+          rows={1}
+          placeholder={running ? 'Nommer la sortie' : 'Nommer la séance'}
+          aria-label="Titre de la séance"
+          className="w-full resize-none bg-transparent t-title text-[32px] sm:text-[40px] placeholder:text-faint outline-none [field-sizing:content] focus-visible:outline-none"
+        />
+      </div>
 
-      {data.type === 'running' ? (
+      {running ? (
         <RunningSessionView session={data} onChange={load} />
       ) : (
         <>
@@ -193,28 +243,21 @@ export function SessionPage() {
             <button
               type="button"
               onClick={() => setRecapOpen(true)}
-              className="w-full mb-6 flex items-center gap-3 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-4 py-3 text-left hover:border-[color:var(--color-border-strong)] hover:bg-[color:var(--color-surface-2)]/60 transition-colors cursor-pointer group"
+              className="mt-4 w-full flex items-center gap-3 rounded-[12px] bg-surface px-4 h-14 text-left cursor-pointer active:bg-surface-2"
             >
-              <span className="w-9 h-9 rounded-xl bg-[color:var(--color-accent-soft)] text-[color:var(--color-accent)] flex items-center justify-center shrink-0">
-                <History size={16} />
+              <History size={18} className="text-dim shrink-0" />
+              <span className="flex-1 min-w-0 truncate">
+                <span className="font-semibold">Séance similaire</span>
+                <span className="text-dim"> du {format(new Date(lastSimilar.session.date + 'T12:00:00'), 'd MMMM', { locale: fr })}</span>
               </span>
-              <span className="flex-1 min-w-0">
-                <span className="block text-sm font-medium">Dernière séance similaire</span>
-                <span className="block text-xs text-[color:var(--color-text-dim)] truncate capitalize">
-                  {format(new Date(lastSimilar.session.date), 'd MMM', { locale: fr })}
-                  {' · '}
-                  {lastSimilar.overlap} exo{lastSimilar.overlap > 1 ? 's' : ''} en commun
-                </span>
-              </span>
-              <ChevronRight size={16} className="text-[color:var(--color-text-dim)] group-hover:translate-x-0.5 transition-transform shrink-0" />
+              <ChevronRight size={18} className="text-faint shrink-0" />
             </button>
           )}
 
-          <div className="space-y-4">
-            {data.exercises.map((ex, i) => (
+          <div className="mt-6 space-y-4 xl:space-y-0 xl:grid xl:grid-cols-2 xl:gap-4 xl:items-start">
+            {data.exercises.map(ex => (
               <ExerciseCard
                 key={ex.id}
-                index={i + 1}
                 sessionId={id}
                 exercise={ex}
                 unit={unit}
@@ -222,34 +265,57 @@ export function SessionPage() {
                 previous={prevPerf.get(normalizeExerciseName(ex.name))}
                 onChange={load}
                 onSetAdded={onSetAdded}
+                onSetRemoved={onSetRemoved}
               />
             ))}
           </div>
 
-          <AddExercise suggestions={exerciseNames} onAdd={onAddExercise} />
+          <AddExercise
+            suggestions={exerciseNames}
+            already={data.exercises.map(e => normalizeExerciseName(e.name))}
+            onAdd={onAddExercise}
+            first={data.exercises.length === 0}
+          />
         </>
       )}
+
+      <div className="mt-12 pt-5 hairline-t">
+        <Button variant="danger-soft" className="w-full" onClick={onDeleteSession}>
+          <Trash2 size={16} /> Supprimer la séance
+        </Button>
+      </div>
+
+      <AnimatePresence>
+        {undo && (
+          <motion.div
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 20, opacity: 0 }}
+            className={cn('fixed inset-x-0 z-50 flex justify-center px-4 pointer-events-none', timerOpen ? 'bottom-[calc(env(safe-area-inset-bottom)+8.5rem)]' : 'bottom-[calc(env(safe-area-inset-bottom)+1rem)]')}
+            role="status"
+          >
+            <div className="pointer-events-auto flex items-center gap-3 rounded-[12px] bg-ink text-bg pl-4 pr-1.5 h-12 shadow-[0_12px_32px_-10px_rgba(0,0,0,0.6)]">
+              <span className="text-[14px] font-semibold">Série supprimée</span>
+              <button onClick={restoreRemoved} className="h-9 px-3 rounded-[8px] bg-bg/15 text-[14px] font-semibold cursor-pointer">Annuler</button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <RestTimer open={timerOpen} onClose={() => setTimerOpen(false)} defaultSeconds={restSeconds} />
 
       {lastSimilar && (
         <Sheet open={recapOpen} onOpenChange={setRecapOpen}>
-          <SheetContent side="bottom" className="max-h-[85dvh]">
-            <SheetHeader>
-              <p className="text-xs uppercase tracking-[0.18em] text-[color:var(--color-text-dim)] font-medium">
-                Dernière séance similaire
-              </p>
-              <h3 className="font-display text-2xl mt-1 capitalize">
-                {format(new Date(lastSimilar.session.date), 'EEEE d MMMM', { locale: fr })}
-              </h3>
-              {lastSimilar.session.notes && (
-                <p className="text-sm text-[color:var(--color-text-dim)] mt-0.5 truncate">
-                  {lastSimilar.session.notes}
-                </p>
-              )}
+          <SheetContent side="bottom">
+            <SheetHeader className="pt-4">
+              <p className="text-[14px] text-dim font-medium">Séance similaire</p>
+              <SheetTitle className="t-title text-[26px] mt-1 first-letter:uppercase">
+                {format(new Date(lastSimilar.session.date + 'T12:00:00'), 'EEEE d MMMM', { locale: fr })}
+              </SheetTitle>
+              {lastSimilar.session.notes && <p className="text-[15px] text-dim mt-1 truncate">{lastSimilar.session.notes}</p>}
             </SheetHeader>
-            <SheetBody className="pb-[calc(env(safe-area-inset-bottom,0px)+1.5rem)]">
-              <div className="space-y-5">
+            <SheetBody>
+              <div className="space-y-5 pt-2">
                 {lastSimilar.session.exercises.map(ex => (
                   <RecapExercise
                     key={ex.id}
@@ -264,7 +330,7 @@ export function SessionPage() {
                 className="w-full mt-6"
                 onClick={() => { setRecapOpen(false); nav(`/session/${lastSimilar.session.id}`) }}
               >
-                Ouvrir la séance complète
+                Ouvrir cette séance
               </Button>
             </SheetBody>
           </SheetContent>
@@ -274,15 +340,34 @@ export function SessionPage() {
       <AnimatePresence>
         {prToast && (
           <motion.div
-            initial={{ y: -80, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: -60, opacity: 0 }}
-            className="fixed top-4 left-0 right-0 z-50 pointer-events-none flex justify-center safe-top"
+            initial={{ y: -40, opacity: 0, scale: 0.9 }}
+            animate={{ y: 0, opacity: 1, scale: 1 }}
+            exit={{ y: -30, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 26 }}
+            className="fixed inset-x-0 top-0 z-50 pointer-events-none flex justify-center px-4 pt-[calc(env(safe-area-inset-top)+0.75rem)]"
+            role="status"
           >
-            <div className="pointer-events-auto rounded-full bg-[color:var(--color-accent-fill)] text-[color:var(--color-accent-text)] px-5 py-2.5 flex items-center gap-2 shadow-2xl">
-              <Trophy size={16} />
-              <span className="text-sm font-medium">
-                Nouveau PR sur {prToast.name} — {prToast.bodyweight ? `lest +${round(fromKg(prToast.weight, unit), 1)} ${unit}` : formatWeight(prToast.weight, unit, 1)}
+            <div className="rounded-[12px] bg-pr text-white pl-3 pr-5 py-3 flex items-center gap-3 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.6)] max-w-md">
+              <motion.span
+                initial={{ rotate: -120 }}
+                animate={{ rotate: 0 }}
+                transition={{ type: 'spring', stiffness: 200, damping: 14, delay: 0.05 }}
+              >
+                <svg width="34" height="34" viewBox="0 0 24 24" aria-hidden>
+                  <circle cx="12" cy="12" r="11.25" fill="#fff" fillOpacity="0.22" />
+                  <circle cx="12" cy="12" r="7.4" fill="none" stroke="#fff" strokeOpacity="0.6" strokeWidth="1.1" />
+                  <circle cx="12" cy="12" r="2.4" fill="#fff" />
+                </svg>
+              </motion.span>
+              <span className="min-w-0">
+                <span className="block text-[13px] font-semibold opacity-90">Nouveau record</span>
+                <span className="block font-semibold truncate">
+                  {prToast.name}{' '}
+                  <span className="num text-[20px]">
+                    {prToast.bodyweight ? `+${frNum(fromKg(prToast.weight, unit), 1)}` : frNum(fromKg(prToast.weight, unit), 1)}
+                  </span>{' '}
+                  {unit}
+                </span>
               </span>
             </div>
           </motion.div>
@@ -292,8 +377,32 @@ export function SessionPage() {
   )
 }
 
+/* ── Formatting helpers ──────────────────────────────────────────────── */
+
+function loadText(weightKg: number, unit: Unit, bodyweight: boolean): string {
+  if (bodyweight && weightKg <= 0) return 'PDC'
+  return `${bodyweight ? '+' : ''}${frNum(fromKg(weightKg, unit), 1)}`
+}
+
+function compactSet(weightKg: number, reps: number, unit: Unit, bodyweight: boolean): string {
+  return `${reps}×${loadText(weightKg, unit, bodyweight)}`
+}
+
+function compactSetWithDrops(s: ExerciseSet, unit: Unit, bodyweight: boolean): string {
+  const main = compactSet(Number(s.weight), s.reps, unit, bodyweight)
+  if (!s.drops || s.drops.length === 0) return main
+  return `${main} → ${s.drops.map(d => compactSet(Number(d.weight), d.reps, unit, bodyweight)).join(' → ')}`
+}
+
+function formatVolume(kg: number, unit: Unit): string {
+  const v = fromKg(kg, unit)
+  if (v >= 10000) return unit === 'kg' ? `${frNum(v / 1000, 1)} t` : `${frNum(v / 1000, 1)}k lb`
+  return `${Math.round(v).toLocaleString('fr-FR')} ${unit}`
+}
+
+/* ── Exercise card ───────────────────────────────────────────────────── */
+
 function ExerciseCard({
-  index,
   sessionId,
   exercise,
   unit,
@@ -301,39 +410,31 @@ function ExerciseCard({
   previous,
   onChange,
   onSetAdded,
+  onSetRemoved,
 }: {
-  index: number
   sessionId: string
   exercise: Exercise
-  unit: 'kg' | 'lb'
+  unit: Unit
   previousPR: number
   previous?: PreviousPerformance
   onChange: () => void
   onSetAdded: (name: string, weightKg: number, bodyweight: boolean) => void
+  onSetRemoved: (exerciseId: string, set: ExerciseSet, position: number) => void
 }) {
   const confirm = useConfirm()
   const nav = useNavigate()
   const [reps, setReps] = useState('')
   const [weight, setWeight] = useState('')
   const [adding, setAdding] = useState(false)
+  const [platesOpen, setPlatesOpen] = useState(false)
+  const isBw = !!exercise.bodyweight
   const lastSet = exercise.sets[exercise.sets.length - 1]
   const bestKg = exercise.sets.reduce((m, s) => Math.max(m, setMaxWeightKg(s)), 0)
-  const bestPreview = useMemo(() => {
-    // Best = heaviest weight; ties broken by higher reps. Compares main effort only.
-    const best = exercise.sets.reduce<ExerciseSet | null>((m, s) => {
-      if (!m) return s
-      const sw = Number(s.weight)
-      const mw = Number(m.weight)
-      if (sw > mw) return s
-      if (sw === mw && s.reps > m.reps) return s
-      return m
-    }, null)
-    if (!best) return null
-    const volumeKg = exercise.sets.reduce((sum, s) => sum + setVolumeKg(s), 0)
-    return { set: best, volumeKg }
-  }, [exercise.sets])
+  const isPR = previousPR > 0 && bestKg > previousPR
+  const step = unit === 'kg' ? 2.5 : 5
 
-  const isBw = !!exercise.bodyweight
+  // What to suggest in the quick-fill chips: this session's last set, else last time's first set.
+  const reference = lastSet ?? previous?.sets[0]
 
   async function onAddSet(e: React.FormEvent) {
     e.preventDefault()
@@ -354,255 +455,191 @@ function ExerciseCard({
     }
   }
 
-  function reuseLast() {
-    if (!lastSet) return
-    setReps(String(lastSet.reps))
-    setWeight(String(round(fromKg(Number(lastSet.weight), unit), 1)))
+  function fill(r: number, wKg: number) {
+    setReps(String(r))
+    setWeight(frNum(fromKg(wKg, unit), 1))
   }
 
+  const volume = exercise.sets.reduce((sum, s) => sum + setVolumeKg(s), 0)
+  const totalReps = exercise.sets.reduce((n, s) => n + setTotalReps(s), 0)
+
   return (
-    <Card className="p-5">
-      <header className="flex items-start justify-between gap-3 mb-1">
-        <div className="flex items-baseline gap-2 min-w-0">
-          <span className="font-mono text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)]">#{String(index).padStart(2, '0')}</span>
-          {exercise.bodyweight && (
-            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-semibold border border-[color:var(--color-border)] px-1.5 py-0.5 rounded-full">
-              PDC
-            </span>
-          )}
-          {previousPR > 0 && bestKg > previousPR && (
-            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-[color:var(--color-accent)] font-semibold">
-              <Trophy size={10} /> PR
-            </span>
+    <Card className="p-4">
+      <header className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <button
+            onClick={() => nav(`/exercise/${slugifyExerciseName(exercise.name)}?key=${encodeURIComponent(normalizeExerciseName(exercise.name))}`)}
+            className="t-heading text-[20px] text-left cursor-pointer hover:underline underline-offset-4 decoration-line-strong"
+          >
+            {exercise.name}
+          </button>
+          {(isBw || isPR || exercise.sets.length > 0) && (
+            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+              {isPR && <Tag tone="pr">Record</Tag>}
+              {isBw && <Tag>Poids du corps</Tag>}
+              {exercise.sets.length > 0 && (
+                <span className="text-[13px] text-dim">
+                  {exercise.sets.length} série{exercise.sets.length > 1 ? 's' : ''}, {isBw ? `${totalReps} reps` : formatVolume(volume, unit)}
+                </span>
+              )}
+            </div>
           )}
         </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={async () => {
-                const ok = await confirm({
-                  title: `Supprimer "${exercise.name}" ?`,
-                  description: 'Toutes les séries de cet exercice seront supprimées.',
-                  confirmLabel: 'Supprimer',
-                  danger: true,
-                })
-                if (!ok) return
-                await deleteExercise(sessionId, exercise.id)
-                onChange()
-              }}
-              className="p-1.5 -m-1.5 rounded-full text-[color:var(--color-text-dim)] hover:text-[color:var(--color-danger)] hover:bg-[color:var(--color-danger)]/10 transition-colors cursor-pointer shrink-0"
-              aria-label="Supprimer l'exercice"
-            >
-              <Trash2 size={14} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="left">Supprimer l'exercice</TooltipContent>
-        </Tooltip>
+        <button
+          onClick={async () => {
+            const ok = await confirm({
+              title: `Retirer « ${exercise.name} » ?`,
+              description: 'Toutes les séries de cet exercice seront supprimées de la séance.',
+              confirmLabel: 'Retirer',
+              danger: true,
+            })
+            if (!ok) return
+            await deleteExercise(sessionId, exercise.id)
+            onChange()
+          }}
+          className="h-10 w-10 -mr-2 -mt-1.5 grid place-items-center rounded-full text-faint hover:text-danger cursor-pointer shrink-0"
+          aria-label={`Retirer ${exercise.name}`}
+        >
+          <X size={18} />
+        </button>
       </header>
-      <button
-        onClick={() => nav(`/exercise/${slugifyExerciseName(exercise.name)}?key=${encodeURIComponent(normalizeExerciseName(exercise.name))}`)}
-        className="font-display text-2xl leading-tight text-left hover:text-[color:var(--color-accent)] transition-colors cursor-pointer inline-flex items-center gap-1.5 group"
-        title="Voir l'historique de cet exercice"
-      >
-        {exercise.name}
-        <span className="text-xs text-[color:var(--color-text-dim)] opacity-0 group-hover:opacity-100 transition-opacity">↗</span>
-      </button>
 
       {previous && previous.sets.length > 0 && (
-        <div className="mt-2.5 rounded-xl bg-[color:var(--color-surface-2)]/50 border border-[color:var(--color-border)] px-3 py-2">
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium">
-              Dernière fois
-            </span>
-            <span className="text-[10px] text-[color:var(--color-text-dim)] tabular capitalize">
-              {format(new Date(previous.date), 'd MMM', { locale: fr })}
-            </span>
-          </div>
-          <div className="mt-1 font-display tabular text-sm leading-snug">
-            {previous.sets.map((s, i) => (
-              <span key={s.id}>
-                {i > 0 && <span className="text-[color:var(--color-text-dim)]/50"> · </span>}
-                {compactSetWithDrops(s, unit, previous.bodyweight)}
-              </span>
+        <div className="mt-3 flex items-baseline gap-2 text-[13px] min-w-0">
+          <span className="text-dim shrink-0">Dernière fois, {format(new Date(previous.date + 'T12:00:00'), 'd MMM', { locale: fr })}</span>
+          <span className="flex gap-x-3 overflow-hidden whitespace-nowrap">
+            {previous.sets.map(s => (
+              <span key={s.id} className="num-light text-[16px] text-ink">{compactSetWithDrops(s, unit, previous.bodyweight)}</span>
             ))}
-          </div>
-        </div>
-      )}
-
-      {bestPreview && (
-        <div className="grid grid-cols-3 gap-2 mt-3 mb-4 text-xs">
-          <MiniStat
-            label="Top"
-            value={`${bestPreview.set.reps}×${
-              isBw && Number(bestPreview.set.weight) <= 0
-                ? 'PDC'
-                : `${isBw ? '+' : ''}${round(fromKg(Number(bestPreview.set.weight), unit), 1)}`
-            }`}
-          />
-          <MiniStat
-            label="Volume"
-            value={isBw ? `${exercise.sets.reduce((n, s) => n + setTotalReps(s), 0)}` : formatVolume(bestPreview.volumeKg, unit)}
-            suffix={isBw ? 'reps' : unit}
-          />
-          <MiniStat label="Séries" value={String(exercise.sets.length)} />
+          </span>
         </div>
       )}
 
       {exercise.sets.length > 0 && (
-        <div className="mt-2">
-          <div className="grid grid-cols-[2rem_1fr_1fr_2rem] items-center gap-2 px-2 pb-1.5 border-b border-[color:var(--color-border)] text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium">
-            <span>#</span>
-            <span className="text-center">Reps</span>
-            <span className="text-center">{isBw ? `Lest ${unit}` : unit}</span>
-            <span />
-          </div>
-          <div className="divide-y divide-[color:var(--color-border)]">
-            {exercise.sets.map((set, i) => (
-              <SetRow
-                key={set.id}
-                sessionId={sessionId}
-                exerciseId={exercise.id}
-                exerciseName={exercise.name}
-                index={i + 1}
-                set={set}
-                unit={unit}
-                bodyweight={isBw}
-                onChange={onChange}
-                onSetAdded={onSetAdded}
-              />
-            ))}
-          </div>
-        </div>
+        <ol className="mt-3 -mx-4">
+          {exercise.sets.map((set, i) => (
+            <SetRow
+              key={set.id}
+              sessionId={sessionId}
+              exerciseId={exercise.id}
+              exerciseName={exercise.name}
+              index={i + 1}
+              set={set}
+              unit={unit}
+              bodyweight={isBw}
+              onChange={onChange}
+              onSetAdded={onSetAdded}
+              onRemoved={(st, pos) => onSetRemoved(exercise.id, st, pos)}
+            />
+          ))}
+        </ol>
       )}
+      {exercise.sets.length > 0 && <SwipeHint />}
 
-      <form onSubmit={onAddSet} className="mt-4 grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
-        <div className="relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium pointer-events-none">reps</span>
-          <Input
-            type="number"
-            value={reps}
-            onChange={e => setReps(e.target.value)}
-            min="0"
-            inputMode="numeric"
-            className="h-11 pl-14 text-right font-display text-lg tabular"
-            placeholder="0"
-          />
-        </div>
-        <div className="relative">
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium pointer-events-none">{isBw ? `lest ${unit}` : unit}</span>
-          <Input
-            type="text"
+      <form onSubmit={onAddSet} className="mt-4">
+        <div className="grid grid-cols-[1fr_1.25fr_auto] gap-2 items-end">
+          <NumField label="Reps" value={reps} onChange={setReps} inputMode="numeric" placeholder={reference ? String(reference.reps) : '0'} />
+          <NumField
+            label={isBw ? `Lest (${unit})` : unit}
             value={weight}
-            onChange={e => setWeight(e.target.value)}
+            onChange={setWeight}
             inputMode="decimal"
-            pattern="[0-9]*[.,]?[0-9]*"
-            autoComplete="off"
-            className={`h-11 text-right font-display text-lg tabular ${isBw ? 'pr-[5.5rem]' : 'pr-10'}`}
-            placeholder={isBw ? '0' : '0.0'}
+            placeholder={reference ? (isBw && Number(reference.weight) <= 0 ? '0' : frNum(fromKg(Number(reference.weight), unit), 1)) : isBw ? '0' : '0,0'}
           />
+          <Button
+            type="submit"
+            size="icon"
+            className="h-14 w-14 rounded-[12px]"
+            disabled={adding || !reps || (!isBw && !weight)}
+            aria-label={`Ajouter la série ${exercise.sets.length + 1}`}
+          >
+            <Plus size={24} strokeWidth={2.5} />
+          </Button>
         </div>
-        <Button type="submit" variant="accent" size="icon" disabled={adding || !reps || (!isBw && !weight)} aria-label="Ajouter la série">
-          <Plus size={18} />
-        </Button>
+
+        {(reference || !isBw) && (
+          <div className="flex gap-2 mt-2.5 overflow-x-auto no-scrollbar -mx-4 px-4">
+            {reference && (
+              <QuickChip onClick={() => fill(reference.reps, Number(reference.weight))}>
+                {lastSet ? 'Refaire' : 'Comme la dernière fois'} <span className="num text-[16px]">{reference.reps}×{loadText(Number(reference.weight), unit, isBw)}</span>
+              </QuickChip>
+            )}
+            {reference && !isBw && (
+              <QuickChip onClick={() => fill(reference.reps, Number(reference.weight) + toKg(step, unit))}>
+                <span className="num text-[16px]">+{frNum(step, 1)}</span> {unit}
+              </QuickChip>
+            )}
+            {reference && (
+              <QuickChip onClick={() => fill(reference.reps + 1, Number(reference.weight))}>
+                <span className="num text-[16px]">+1</span> rep
+              </QuickChip>
+            )}
+            {!isBw && (
+              <QuickChip onClick={() => setPlatesOpen(true)}>
+                <Disc size={15} /> Disques
+              </QuickChip>
+            )}
+          </div>
+        )}
       </form>
-      {lastSet && !reps && !weight && (
-        <button
-          type="button"
-          onClick={reuseLast}
-          className="text-xs text-[color:var(--color-text-dim)] hover:text-[color:var(--color-accent)] mt-3 transition-colors cursor-pointer inline-flex items-center gap-1"
-        >
-          ↻ Reprendre {lastSet.reps} × {formatLoadDisplay(Number(lastSet.weight), unit, isBw)}
-        </button>
+      {!isBw && (
+        <PlateCalculator
+          open={platesOpen}
+          onOpenChange={setPlatesOpen}
+          initial={(() => {
+            const typed = parseDecimal(weight)
+            if (!Number.isNaN(typed) && typed > 0) return typed
+            return reference ? round(fromKg(Number(reference.weight), unit), 2) : undefined
+          })()}
+        />
       )}
     </Card>
   )
 }
 
-function formatVolume(kg: number, unit: 'kg' | 'lb'): string {
-  const v = fromKg(kg, unit)
-  if (v >= 1000) return `${round(v / 1000, 1)}k`
-  return String(Math.round(v))
-}
-
-/** Display the loaded weight for a set, accounting for bodyweight mode. */
-function formatLoadDisplay(weightKg: number, unit: 'kg' | 'lb', bodyweight: boolean): string {
-  if (bodyweight) {
-    if (weightKg <= 0) return 'PDC'
-    return `+${round(fromKg(weightKg, unit), 1)} ${unit}`
-  }
-  return formatWeight(weightKg, unit, 1)
-}
-
-/** Compact "reps×weight" for a set — unit-less, with "+" / "PDC" for bodyweight mode. */
-function compactSet(weightKg: number, reps: number, unit: 'kg' | 'lb', bodyweight: boolean): string {
-  if (bodyweight && weightKg <= 0) return `${reps}×PDC`
-  return `${reps}×${bodyweight ? '+' : ''}${round(fromKg(weightKg, unit), 1)}`
-}
-
-/** Like compactSet, but appends drop stages with a chevron. e.g. "8×15→4×13". */
-function compactSetWithDrops(s: ExerciseSet, unit: 'kg' | 'lb', bodyweight: boolean): string {
-  const main = compactSet(Number(s.weight), s.reps, unit, bodyweight)
-  if (!s.drops || s.drops.length === 0) return main
-  const tail = s.drops.map(d => compactSet(Number(d.weight), d.reps, unit, bodyweight)).join('→')
-  return `${main}→${tail}`
-}
-
-/** Read-only exercise row shown in the "last similar session" recap sheet. */
-function RecapExercise({
-  exercise,
-  unit,
-  shared,
+function NumField({
+  label,
+  value,
+  onChange,
+  inputMode,
+  placeholder,
 }: {
-  exercise: Exercise
-  unit: 'kg' | 'lb'
-  shared: boolean
+  label: string
+  value: string
+  onChange: (v: string) => void
+  inputMode: 'numeric' | 'decimal'
+  placeholder: string
 }) {
-  const isBw = !!exercise.bodyweight
   return (
-    <div>
-      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-        <h4 className="font-display text-lg leading-tight">{exercise.name}</h4>
-        {shared && (
-          <span className="text-[9px] uppercase tracking-widest text-[color:var(--color-accent)] font-semibold border border-[color:var(--color-accent)]/30 bg-[color:var(--color-accent-soft)] px-1.5 py-0.5 rounded-full">
-            en commun
-          </span>
-        )}
-        {isBw && (
-          <span className="text-[9px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-semibold border border-[color:var(--color-border)] px-1.5 py-0.5 rounded-full">
-            PDC
-          </span>
-        )}
-      </div>
-      {exercise.sets.length === 0 ? (
-        <p className="text-xs text-[color:var(--color-text-dim)]">Aucune série loggée</p>
-      ) : (
-        <div className="flex flex-wrap gap-1.5">
-          {exercise.sets.map((s, i) => (
-            <span
-              key={s.id}
-              className="inline-flex items-baseline gap-1.5 rounded-lg bg-[color:var(--color-surface-2)] border border-[color:var(--color-border)] px-2 py-1"
-            >
-              <span className="text-[9px] font-mono tabular text-[color:var(--color-text-dim)]">{String(i + 1).padStart(2, '0')}</span>
-              <span className="font-display tabular text-sm">{compactSetWithDrops(s, unit, isBw)}</span>
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
+    <label className="block min-w-0">
+      <span className="block text-[12px] font-semibold text-dim mb-1 pl-1">{label}</span>
+      <Input
+        type="text"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        inputMode={inputMode}
+        pattern={inputMode === 'numeric' ? '[0-9]*' : '[0-9]*[.,]?[0-9]*'}
+        autoComplete="off"
+        placeholder={placeholder}
+        className="h-14 num text-[28px] text-center px-2 placeholder:text-faint/70"
+      />
+    </label>
   )
 }
 
-function MiniStat({ label, value, suffix }: { label: string; value: string; suffix?: string }) {
+function QuickChip({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
   return (
-    <div className="rounded-xl bg-[color:var(--color-surface-2)]/60 border border-[color:var(--color-border)] px-3 py-2">
-      <p className="text-[9px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium">{label}</p>
-      <p className="font-display tabular text-sm leading-tight mt-0.5">
-        {value}
-        {suffix && <span className="text-[color:var(--color-text-dim)] text-[10px] ml-0.5">{suffix}</span>}
-      </p>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      className="h-9 shrink-0 rounded-full bg-surface-2 px-3.5 text-[13px] font-semibold text-ink flex items-center gap-1 cursor-pointer active:bg-line"
+    >
+      {children}
+    </button>
   )
 }
+
+/* ── Set rows ────────────────────────────────────────────────────────── */
 
 function SetRow({
   sessionId,
@@ -614,28 +651,37 @@ function SetRow({
   bodyweight,
   onChange,
   onSetAdded,
+  onRemoved,
 }: {
   sessionId: string
   exerciseId: string
   exerciseName: string
   index: number
   set: ExerciseSet
-  unit: 'kg' | 'lb'
+  unit: Unit
   bodyweight: boolean
   onChange: () => void
   onSetAdded: (name: string, weightKg: number, bodyweight: boolean) => void
+  onRemoved: (set: ExerciseSet, position: number) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [reps, setReps] = useState(String(set.reps))
-  const [weight, setWeight] = useState(String(round(fromKg(Number(set.weight), unit), 1)))
+  const [weight, setWeight] = useState(frNum(fromKg(Number(set.weight), unit), 1))
   const [addingDrop, setAddingDrop] = useState(false)
   const [dropReps, setDropReps] = useState('')
   const [dropWeight, setDropWeight] = useState('')
   const [submittingDrop, setSubmittingDrop] = useState(false)
 
-  async function save() {
-    const parsed = parseDecimal(weight)
-    if (Number.isNaN(parsed) || parsed < 0) return
+  function startEdit() {
+    setReps(String(set.reps))
+    setWeight(frNum(fromKg(Number(set.weight), unit), 1))
+    setEditing(true)
+  }
+
+  async function save(e?: React.FormEvent) {
+    e?.preventDefault()
+    const parsed = parseDecimal(weight || '0')
+    if (Number.isNaN(parsed) || parsed < 0 || !reps) return
     await updateSet(sessionId, exerciseId, set.id, { reps: Number(reps), weight: toKg(parsed, unit) })
     setEditing(false)
     onChange()
@@ -644,6 +690,13 @@ function SetRow({
   async function remove() {
     await deleteSet(sessionId, exerciseId, set.id)
     onChange()
+    onRemoved(set, index - 1)
+  }
+
+  async function duplicate() {
+    await addSet(sessionId, exerciseId, set.reps, Number(set.weight))
+    onChange()
+    onSetAdded(exerciseName, Number(set.weight), bodyweight)
   }
 
   async function submitDrop(e: React.FormEvent) {
@@ -667,128 +720,61 @@ function SetRow({
   }
 
   return (
-    <div>
+    <li className="hairline-t">
       {editing ? (
-        <div className="grid grid-cols-[2rem_1fr_1fr_2rem] items-center gap-2 py-1.5 px-2 bg-[color:var(--color-accent-soft)] rounded-lg -mx-2">
-          <span className="text-[10px] font-mono tabular text-[color:var(--color-text-dim)] text-center">{String(index).padStart(2, '0')}</span>
-          <Input
-            type="number"
-            value={reps}
-            onChange={e => setReps(e.target.value)}
-            className="h-9 text-center font-display text-base tabular px-2"
-            inputMode="numeric"
-            autoFocus
-          />
-          <Input
-            type="text"
-            value={weight}
-            onChange={e => setWeight(e.target.value)}
-            className="h-9 text-center font-display text-base tabular px-2"
-            inputMode="decimal"
-            pattern="[0-9]*[.,]?[0-9]*"
-            autoComplete="off"
-          />
-          <div className="flex items-center justify-end gap-1">
-            <button
-              type="button"
-              onClick={save}
-              className="p-1.5 rounded-full bg-[color:var(--color-accent-fill)] text-[color:var(--color-accent-text)] hover:bg-[color:var(--color-accent-fill-hover)] transition-colors cursor-pointer"
-              aria-label="Enregistrer"
-            >
-              <Check size={12} />
-            </button>
-          </div>
-        </div>
+        <form onSubmit={save} className="flex items-center gap-2 px-4 py-2 bg-surface-2/60">
+          <span className="w-6 num-light text-[15px] text-faint text-center shrink-0">{index}</span>
+          <Input value={reps} onChange={e => setReps(e.target.value)} inputMode="numeric" autoFocus aria-label="Répétitions" className="h-11 num text-[22px] text-center px-1 bg-surface" />
+          <span className="text-faint">×</span>
+          <Input value={weight} onChange={e => setWeight(e.target.value)} inputMode="decimal" aria-label="Charge" className="h-11 num text-[22px] text-center px-1 bg-surface" />
+          <Button type="submit" size="sm" className="h-11 shrink-0">OK</Button>
+          <button type="button" onClick={() => setEditing(false)} className="h-11 w-9 grid place-items-center text-faint cursor-pointer shrink-0" aria-label="Annuler">
+            <X size={18} />
+          </button>
+        </form>
       ) : (
-        <div
-          onClick={() => setEditing(true)}
-          className="group grid grid-cols-[2rem_1fr_1fr_2rem] items-center gap-2 py-2.5 px-2 hover:bg-[color:var(--color-surface-2)]/60 cursor-pointer transition-colors"
-          role="button"
-          tabIndex={0}
-          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditing(true) } }}
-        >
-          <span className="text-[10px] font-mono tabular text-[color:var(--color-text-dim)] text-center">
-            {String(index).padStart(2, '0')}
-          </span>
-          <span className="font-display text-lg tabular text-center leading-none">{set.reps}</span>
-          <span className="font-display text-lg tabular text-center leading-none">
-            {bodyweight && Number(set.weight) <= 0
-              ? <span className="text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-semibold">PDC</span>
-              : `${bodyweight ? '+' : ''}${round(fromKg(Number(set.weight), unit), 1)}`}
-          </span>
-          <div className="flex items-center justify-end">
-            <button
-              onClick={e => { e.stopPropagation(); remove() }}
-              className="p-1.5 rounded-full text-[color:var(--color-text-dim)]/60 hover:text-[color:var(--color-danger)] hover:bg-[color:var(--color-danger)]/10 transition-all cursor-pointer"
-              aria-label="Supprimer la série"
-            >
-              <Trash2 size={12} />
-            </button>
-          </div>
+        <SwipeRow onSwipeLeft={remove} onSwipeRight={duplicate}>
+        <div className="flex items-center gap-1 pl-4 pr-2 h-[52px] bg-surface">
+          <span className="w-6 num-light text-[15px] text-faint text-center shrink-0" aria-label={`Série ${index}`}>{index}</span>
+          <button onClick={startEdit} className="flex-1 flex items-baseline gap-2 pl-2 h-full cursor-pointer text-left" aria-label={`Modifier la série ${index}`}>
+            <span className="num text-[26px] self-center">{set.reps}</span>
+            <span className="text-faint text-[15px] self-center">×</span>
+            <span className="num text-[26px] self-center">{loadText(Number(set.weight), unit, bodyweight)}</span>
+            {!(bodyweight && Number(set.weight) <= 0) && <span className="text-[13px] font-semibold text-dim self-center">{unit}</span>}
+          </button>
+          <button
+            onClick={() => setAddingDrop(v => !v)}
+            className={cn('h-10 px-2.5 rounded-full text-[12px] font-semibold flex items-center gap-1 cursor-pointer', addingDrop ? 'text-ink' : 'text-faint hover:text-ink')}
+            aria-label="Ajouter une dégressive"
+            aria-expanded={addingDrop}
+          >
+            <CornerDownRight size={15} /> Dégr.
+          </button>
+          <button onClick={duplicate} className="hidden sm:grid h-10 w-10 place-items-center rounded-full text-faint hover:text-ink cursor-pointer" aria-label={`Dupliquer la série ${index}`}>
+            <Copy size={16} />
+          </button>
+          <button onClick={remove} className="hidden sm:grid h-10 w-10 place-items-center rounded-full text-faint hover:text-danger cursor-pointer" aria-label={`Supprimer la série ${index}`}>
+            <Trash2 size={16} />
+          </button>
         </div>
+        </SwipeRow>
       )}
 
       {set.drops?.map(drop => (
-        <DropRow
-          key={drop.id}
-          sessionId={sessionId}
-          exerciseId={exerciseId}
-          setId={set.id}
-          drop={drop}
-          unit={unit}
-          bodyweight={bodyweight}
-          onChange={onChange}
-        />
+        <DropRow key={drop.id} sessionId={sessionId} exerciseId={exerciseId} setId={set.id} drop={drop} unit={unit} bodyweight={bodyweight} onChange={onChange} />
       ))}
 
-      {addingDrop ? (
-        <form
-          onSubmit={submitDrop}
-          className="grid grid-cols-[2rem_1fr_1fr_2rem] items-center gap-2 py-1.5 px-2 -mx-2"
-        >
-          <span className="text-center text-[color:var(--color-text-dim)] text-xs">↳</span>
-          <Input
-            type="number"
-            value={dropReps}
-            onChange={e => setDropReps(e.target.value)}
-            className="h-9 text-center font-display text-sm tabular px-2"
-            inputMode="numeric"
-            placeholder="reps"
-            autoFocus
-          />
-          <Input
-            type="text"
-            value={dropWeight}
-            onChange={e => setDropWeight(e.target.value)}
-            className="h-9 text-center font-display text-sm tabular px-2"
-            inputMode="decimal"
-            pattern="[0-9]*[.,]?[0-9]*"
-            autoComplete="off"
-            placeholder={bodyweight ? `lest ${unit}` : unit}
-          />
-          <div className="flex items-center justify-end gap-1">
-            <button
-              type="submit"
-              disabled={submittingDrop || !dropReps || (!bodyweight && !dropWeight)}
-              className="p-1.5 rounded-full bg-[color:var(--color-accent-fill)] text-[color:var(--color-accent-text)] hover:bg-[color:var(--color-accent-fill-hover)] disabled:opacity-40 transition-colors cursor-pointer"
-              aria-label="Ajouter le drop"
-            >
-              <Check size={12} />
-            </button>
-          </div>
+      {addingDrop && (
+        <form onSubmit={submitDrop} className="flex items-center gap-2 pl-10 pr-4 pb-2.5">
+          <CornerDownRight size={16} className="text-faint shrink-0" />
+          <Input value={dropReps} onChange={e => setDropReps(e.target.value)} inputMode="numeric" placeholder="reps" autoFocus aria-label="Répétitions de la dégressive" className="h-11 num text-[20px] text-center px-1" />
+          <Input value={dropWeight} onChange={e => setDropWeight(e.target.value)} inputMode="decimal" placeholder={bodyweight ? `lest ${unit}` : unit} aria-label="Charge de la dégressive" className="h-11 num text-[20px] text-center px-1" />
+          <Button type="submit" size="sm" className="h-11 shrink-0" disabled={submittingDrop || !dropReps || (!bodyweight && !dropWeight)}>
+            Ajouter
+          </Button>
         </form>
-      ) : (
-        !editing && (
-          <button
-            type="button"
-            onClick={() => setAddingDrop(true)}
-            className="ml-8 mt-0.5 mb-1 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] hover:text-[color:var(--color-accent)] font-medium transition-colors cursor-pointer inline-flex items-center gap-1"
-          >
-            + Drop
-          </button>
-        )
       )}
-    </div>
+    </li>
   )
 }
 
@@ -805,16 +791,17 @@ function DropRow({
   exerciseId: string
   setId: string
   drop: SetDrop
-  unit: 'kg' | 'lb'
+  unit: Unit
   bodyweight: boolean
   onChange: () => void
 }) {
   const [editing, setEditing] = useState(false)
   const [reps, setReps] = useState(String(drop.reps))
-  const [weight, setWeight] = useState(String(round(fromKg(Number(drop.weight), unit), 1)))
+  const [weight, setWeight] = useState(frNum(fromKg(Number(drop.weight), unit), 1))
 
-  async function save() {
-    const parsed = parseDecimal(weight)
+  async function save(e?: React.FormEvent) {
+    e?.preventDefault()
+    const parsed = parseDecimal(weight || '0')
     if (Number.isNaN(parsed) || parsed < 0) return
     await updateSetDrop(sessionId, exerciseId, setId, drop.id, { reps: Number(reps), weight: toKg(parsed, unit) })
     setEditing(false)
@@ -828,108 +815,49 @@ function DropRow({
 
   if (editing) {
     return (
-      <div className="grid grid-cols-[2rem_1fr_1fr_2rem] items-center gap-2 py-1 px-2 bg-[color:var(--color-accent-soft)]/60 rounded-lg -mx-2">
-        <span className="text-center text-[color:var(--color-text-dim)] text-xs">↳</span>
-        <Input
-          type="number"
-          value={reps}
-          onChange={e => setReps(e.target.value)}
-          className="h-8 text-center font-display text-sm tabular px-2"
-          inputMode="numeric"
-          autoFocus
-        />
-        <Input
-          type="text"
-          value={weight}
-          onChange={e => setWeight(e.target.value)}
-          className="h-8 text-center font-display text-sm tabular px-2"
-          inputMode="decimal"
-          pattern="[0-9]*[.,]?[0-9]*"
-          autoComplete="off"
-        />
-        <div className="flex items-center justify-end gap-1">
-          <button
-            type="button"
-            onClick={save}
-            className="p-1 rounded-full bg-[color:var(--color-accent-fill)] text-[color:var(--color-accent-text)] hover:bg-[color:var(--color-accent-fill-hover)] transition-colors cursor-pointer"
-            aria-label="Enregistrer le drop"
-          >
-            <Check size={11} />
-          </button>
-        </div>
-      </div>
+      <form onSubmit={save} className="flex items-center gap-2 pl-10 pr-4 py-1.5">
+        <CornerDownRight size={16} className="text-faint shrink-0" />
+        <Input value={reps} onChange={e => setReps(e.target.value)} inputMode="numeric" autoFocus aria-label="Répétitions" className="h-10 num text-[18px] text-center px-1" />
+        <Input value={weight} onChange={e => setWeight(e.target.value)} inputMode="decimal" aria-label="Charge" className="h-10 num text-[18px] text-center px-1" />
+        <Button type="submit" size="sm" className="h-10 shrink-0">OK</Button>
+      </form>
     )
   }
 
   return (
-    <div
-      onClick={() => setEditing(true)}
-      className="group grid grid-cols-[2rem_1fr_1fr_2rem] items-center gap-2 py-1 px-2 hover:bg-[color:var(--color-surface-2)]/60 cursor-pointer transition-colors text-[color:var(--color-text-dim)]"
-      role="button"
-      tabIndex={0}
-      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditing(true) } }}
-    >
-      <span className="text-center text-xs">↳</span>
-      <span className="font-display text-sm tabular text-center leading-none">{drop.reps}</span>
-      <span className="font-display text-sm tabular text-center leading-none">
-        {bodyweight && Number(drop.weight) <= 0
-          ? <span className="text-[10px] uppercase tracking-widest font-semibold">PDC</span>
-          : `${bodyweight ? '+' : ''}${round(fromKg(Number(drop.weight), unit), 1)}`}
-      </span>
-      <div className="flex items-center justify-end">
-        <button
-          onClick={e => { e.stopPropagation(); remove() }}
-          className="p-1 rounded-full text-[color:var(--color-text-dim)]/60 hover:text-[color:var(--color-danger)] hover:bg-[color:var(--color-danger)]/10 transition-all cursor-pointer"
-          aria-label="Supprimer le drop"
-        >
-          <Trash2 size={11} />
-        </button>
-      </div>
+    <div className="flex items-center gap-1 pl-10 pr-2 h-10 text-dim">
+      <CornerDownRight size={15} className="text-faint shrink-0" />
+      <button onClick={() => setEditing(true)} className="flex-1 flex items-baseline gap-1.5 pl-2 cursor-pointer text-left" aria-label="Modifier la dégressive">
+        <span className="num text-[19px]">{drop.reps}</span>
+        <span className="text-faint text-[13px]">×</span>
+        <span className="num text-[19px]">{loadText(Number(drop.weight), unit, bodyweight)}</span>
+      </button>
+      <button onClick={remove} className="h-10 w-10 grid place-items-center rounded-full text-faint hover:text-danger cursor-pointer" aria-label="Supprimer la dégressive">
+        <X size={15} />
+      </button>
     </div>
   )
 }
 
-function AddExercise({ suggestions, onAdd }: { suggestions: string[]; onAdd: (name: string) => void }) {
-  const [name, setName] = useState('')
-  const [focused, setFocused] = useState(false)
-  const filtered = name
-    ? suggestions.filter(s => s.toLowerCase().includes(name.toLowerCase()) && s.toLowerCase() !== name.toLowerCase()).slice(0, 6)
-    : suggestions.slice(0, 6)
+/* ── Recap of the similar session ────────────────────────────────────── */
 
-  function submit(v?: string) {
-    const finalName = v ?? name
-    if (!finalName.trim()) return
-    onAdd(finalName)
-    setName('')
-  }
-
+function RecapExercise({ exercise, unit, shared }: { exercise: Exercise; unit: Unit; shared: boolean }) {
+  const isBw = !!exercise.bodyweight
   return (
-    <div className="mt-6 relative">
-      <Label className="block mb-2">Ajouter un exercice</Label>
-      <form onSubmit={e => { e.preventDefault(); submit() }} className="flex gap-2">
-        <Input
-          value={name}
-          onChange={e => setName(e.target.value)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setTimeout(() => setFocused(false), 150)}
-          placeholder="Ex: Développé couché"
-        />
-        <Button type="submit" variant="accent" disabled={!name.trim()}>
-          <Plus size={16} /> Ajouter
-        </Button>
-      </form>
-      {focused && filtered.length > 0 && (
-        <div className="absolute z-10 top-full left-0 right-0 mt-2 rounded-2xl bg-[color:var(--color-surface)] border border-[color:var(--color-border)] p-1 max-h-56 overflow-y-auto shadow-[var(--shadow-soft)]">
-          {filtered.map(s => (
-            <button
-              key={s}
-              type="button"
-              onMouseDown={e => e.preventDefault()}
-              onClick={() => submit(s)}
-              className="w-full text-left px-3 py-2 rounded-xl hover:bg-[color:var(--color-surface-2)] text-sm"
-            >
-              {s}
-            </button>
+    <div>
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <h4 className="t-heading text-[17px]">{exercise.name}</h4>
+        {shared && <Tag>Aussi aujourd’hui</Tag>}
+        {isBw && <Tag>Poids du corps</Tag>}
+      </div>
+      {exercise.sets.length === 0 ? (
+        <p className="text-[14px] text-dim">Aucune série notée</p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {exercise.sets.map(s => (
+            <span key={s.id} className="rounded-[10px] bg-surface-2 px-2.5 h-9 flex items-center num text-[18px]">
+              {compactSetWithDrops(s, unit, isBw)}
+            </span>
           ))}
         </div>
       )}
@@ -937,9 +865,77 @@ function AddExercise({ suggestions, onAdd }: { suggestions: string[]; onAdd: (na
   )
 }
 
+/* ── Add exercise ────────────────────────────────────────────────────── */
+
+function AddExercise({
+  suggestions,
+  already,
+  onAdd,
+  first,
+}: {
+  suggestions: string[]
+  already: string[]
+  onAdd: (name: string) => Promise<void> | void
+  first: boolean
+}) {
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const q = normalizeExerciseName(name)
+  const pool = suggestions.filter(s => !already.includes(normalizeExerciseName(s)))
+  const filtered = (q ? pool.filter(s => normalizeExerciseName(s).includes(q) && normalizeExerciseName(s) !== q) : pool).slice(0, 8)
+
+  async function submit(v?: string) {
+    const finalName = (v ?? name).trim()
+    if (!finalName || busy) return
+    setBusy(true)
+    try {
+      await onAdd(finalName)
+      setName('')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className={cn(first ? 'mt-6' : 'mt-8')}>
+      <Label htmlFor="add-exercise" className="block mb-2 text-[15px] text-ink font-semibold">
+        {first ? 'Premier exercice' : 'Ajouter un exercice'}
+      </Label>
+      <form onSubmit={e => { e.preventDefault(); submit() }} className="flex gap-2">
+        <Input
+          id="add-exercise"
+          value={name}
+          onChange={e => setName(e.target.value)}
+          placeholder="Développé couché, squat…"
+          autoComplete="off"
+          enterKeyHint="done"
+        />
+        <Button type="submit" disabled={!name.trim() || busy} className="h-12 shrink-0">
+          Ajouter
+        </Button>
+      </form>
+      {filtered.length > 0 && (
+        <div className="flex flex-wrap gap-2 mt-3">
+          {filtered.map(s => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => submit(s)}
+              className="h-9 rounded-full bg-surface px-3.5 text-[14px] font-medium flex items-center gap-1.5 cursor-pointer active:bg-surface-2"
+            >
+              <Plus size={14} className="text-faint" /> {s}
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+/* ── Running ─────────────────────────────────────────────────────────── */
 
 function RunningSessionView({ session, onChange }: { session: Session; onChange: () => void }) {
-  const [distanceKm, setDistanceKm] = useState(session.distanceMeters ? String(Math.round((session.distanceMeters / 1000) * 100) / 100) : '')
+  const [distanceKm, setDistanceKm] = useState(session.distanceMeters ? frNum(session.distanceMeters / 1000, 2) : '')
   const [durationMin, setDurationMin] = useState(session.durationSeconds ? String(Math.floor(session.durationSeconds / 60)) : '')
   const [durationSec, setDurationSec] = useState(session.durationSeconds ? String(session.durationSeconds % 60).padStart(2, '0') : '')
   const [route, setRoute] = useState(session.route ?? '')
@@ -948,9 +944,7 @@ function RunningSessionView({ session, onChange }: { session: Session; onChange:
 
   const distanceMeters = parseDecimal(distanceKm) > 0 ? Math.round(parseDecimal(distanceKm) * 1000) : null
   const durationSeconds = (() => {
-    const m = Number(durationMin) || 0
-    const s = Number(durationSec) || 0
-    const total = m * 60 + s
+    const total = (Number(durationMin) || 0) * 60 + (Number(durationSec) || 0)
     return total > 0 ? total : null
   })()
 
@@ -959,11 +953,7 @@ function RunningSessionView({ session, onChange }: { session: Session; onChange:
     saveTimer.current = window.setTimeout(async () => {
       setSaving(true)
       try {
-        await updateRunningSession(session.id, {
-          distanceMeters,
-          durationSeconds,
-          route: route.trim() || null,
-        })
+        await updateRunningSession(session.id, { distanceMeters, durationSeconds, route: route.trim() || null })
         onChange()
       } finally {
         setSaving(false)
@@ -976,60 +966,121 @@ function RunningSessionView({ session, onChange }: { session: Session; onChange:
   const pace = distanceMeters && durationSeconds
     ? (() => {
         const secPerKm = durationSeconds / (distanceMeters / 1000)
-        const mm = Math.floor(secPerKm / 60)
-        const ss = Math.round(secPerKm % 60)
-        return `${mm}:${String(ss).padStart(2, '0')}`
+        const total = Math.round(secPerKm)
+        return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
       })()
-    : '—'
+    : '–'
 
   return (
-    <div className="space-y-4">
-      <Card className="p-5">
-        <div className="grid grid-cols-3 gap-2 mb-5">
-          <MiniStatRun label="Distance" value={distanceKm || '—'} suffix="km" />
-          <MiniStatRun label="Durée" value={durationMin ? `${durationMin}:${(durationSec || '00').padStart(2, '0')}` : '—'} />
-          <MiniStatRun label="Allure" value={pace} suffix="/km" />
-        </div>
+    <div className="mt-4 space-y-4">
+      <Card className="grid grid-cols-3 py-4">
+        <RunFigure label="Distance" value={distanceKm || '–'} unit="km" />
+        <RunFigure label="Durée" value={durationMin ? `${durationMin}:${(durationSec || '00').padStart(2, '0')}` : '–'} />
+        <RunFigure label="Allure" value={pace} unit="/km" />
+      </Card>
 
-        <div className="space-y-3">
-          <div>
-            <Label className="block mb-1.5">Distance (km)</Label>
-            <Input type="text" value={distanceKm} onChange={e => setDistanceKm(e.target.value)} inputMode="decimal" pattern="[0-9]*[.,]?[0-9]*" autoComplete="off" />
+      <Card className="p-4 space-y-4">
+        <div>
+          <Label htmlFor="run-distance" className="block mb-1.5">Distance</Label>
+          <div className="relative">
+            <Input id="run-distance" value={distanceKm} onChange={e => setDistanceKm(e.target.value)} inputMode="decimal" autoComplete="off" placeholder="0,00" className="num text-[24px] pr-12" />
+            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[14px] font-semibold text-dim pointer-events-none">km</span>
           </div>
-          <div>
-            <Label className="block mb-1.5">Durée</Label>
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1">
-                <Input type="number" min="0" max="600" value={durationMin} onChange={e => setDurationMin(e.target.value)} inputMode="numeric" className="pr-10" />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium pointer-events-none">min</span>
-              </div>
-              <span className="text-[color:var(--color-text-dim)]">:</span>
-              <div className="relative flex-1">
-                <Input type="number" min="0" max="59" value={durationSec} onChange={e => setDurationSec(e.target.value)} inputMode="numeric" className="pr-10" />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium pointer-events-none">sec</span>
-              </div>
+        </div>
+        <div>
+          <Label className="block mb-1.5">Durée</Label>
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Input value={durationMin} onChange={e => setDurationMin(e.target.value)} inputMode="numeric" aria-label="Minutes" placeholder="0" className="num text-[24px] pr-14" />
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[14px] font-semibold text-dim pointer-events-none">min</span>
+            </div>
+            <div className="relative flex-1">
+              <Input value={durationSec} onChange={e => setDurationSec(e.target.value)} inputMode="numeric" aria-label="Secondes" placeholder="00" className="num text-[24px] pr-12" />
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[14px] font-semibold text-dim pointer-events-none">s</span>
             </div>
           </div>
-          <div>
-            <Label className="block mb-1.5">Parcours (optionnel)</Label>
-            <Input value={route} onChange={e => setRoute(e.target.value)} placeholder="Tour du parc, Bord de Seine…" />
-            <p className="text-[10px] text-[color:var(--color-text-dim)] mt-1.5">Donne un nom à ton parcours pour suivre ton progrès sur le même trajet.</p>
-          </div>
-          {saving && <p className="text-[10px] text-[color:var(--color-text-dim)]">Enregistrement…</p>}
         </div>
+        <div>
+          <Label htmlFor="run-route" className="block mb-1.5">Parcours</Label>
+          <Input id="run-route" value={route} onChange={e => setRoute(e.target.value)} placeholder="Tour du parc, bord de l’eau…" />
+          <p className="text-[13px] text-dim mt-1.5">Donne toujours le même nom à un trajet pour comparer tes temps dessus.</p>
+        </div>
+        <p className="text-[12px] text-faint h-4" aria-live="polite">{saving ? 'Enregistrement…' : ''}</p>
       </Card>
     </div>
   )
 }
 
-function MiniStatRun({ label, value, suffix }: { label: string; value: string; suffix?: string }) {
+function RunFigure({ label, value, unit }: { label: string; value: string; unit?: string }) {
   return (
-    <div className="rounded-xl bg-[color:var(--color-surface-2)]/60 border border-[color:var(--color-border)] px-3 py-2">
-      <p className="text-[9px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium">{label}</p>
-      <p className="font-display tabular text-lg leading-tight mt-0.5">
-        {value}
-        {suffix && <span className="text-[color:var(--color-text-dim)] text-[10px] ml-0.5">{suffix}</span>}
+    <div className="text-center px-1">
+      <p className="flex items-baseline justify-center gap-0.5">
+        <span className="num text-[34px] text-run">{value}</span>
+        {unit && <span className="text-[13px] font-semibold text-dim">{unit}</span>}
       </p>
+      <p className="text-[12px] text-faint mt-1">{label}</p>
     </div>
+  )
+}
+
+
+/* ── Swipe gestures on a set row ─────────────────────────────────────── */
+
+const SWIPE_HINT_KEY = 'fit-tracker:swipe-hint-seen'
+const SWIPE_THRESHOLD = 96
+
+/** Swipe left to delete, right to duplicate. Taps still go through to the row. */
+function SwipeRow({ children, onSwipeLeft, onSwipeRight }: { children: React.ReactNode; onSwipeLeft: () => void; onSwipeRight: () => void }) {
+  const x = useMotionValue(0)
+  const leftOpacity = useTransform(x, [0, SWIPE_THRESHOLD], [0, 1])
+  const rightOpacity = useTransform(x, [-SWIPE_THRESHOLD, 0], [1, 0])
+  const dragged = useRef(false)
+  const [armed, setArmed] = useState<'left' | 'right' | null>(null)
+
+  return (
+    <div className="relative overflow-hidden">
+      <motion.div style={{ opacity: leftOpacity }} className={cn('absolute inset-0 flex items-center pl-5 gap-2 text-[14px] font-semibold transition-colors', armed === 'right' ? 'bg-ink text-bg' : 'bg-surface-2 text-ink')} aria-hidden>
+        <Copy size={18} /> Dupliquer
+      </motion.div>
+      <motion.div style={{ opacity: rightOpacity }} className={cn('absolute inset-0 flex items-center justify-end pr-5 gap-2 text-[14px] font-semibold text-white transition-colors', armed === 'left' ? 'bg-danger' : 'bg-danger/60')} aria-hidden>
+        Supprimer <Trash2 size={18} />
+      </motion.div>
+      <motion.div
+        drag="x"
+        dragDirectionLock
+        dragConstraints={{ left: 0, right: 0 }}
+        dragElastic={0.55}
+        dragSnapToOrigin
+        style={{ x, touchAction: 'pan-y' }}
+        onDragStart={() => { dragged.current = true }}
+        onDrag={(_, info) => setArmed(info.offset.x <= -SWIPE_THRESHOLD ? 'left' : info.offset.x >= SWIPE_THRESHOLD ? 'right' : null)}
+        onDragEnd={(_, info) => {
+          setArmed(null)
+          window.setTimeout(() => { dragged.current = false }, 50)
+          if (info.offset.x <= -SWIPE_THRESHOLD || info.offset.x >= SWIPE_THRESHOLD) {
+            try { localStorage.setItem(SWIPE_HINT_KEY, '1') } catch { /* ignore */ }
+            if ('vibrate' in navigator) navigator.vibrate?.(12)
+            if (info.offset.x < 0) onSwipeLeft()
+            else onSwipeRight()
+          }
+        }}
+        onClickCapture={e => { if (dragged.current) { e.stopPropagation(); e.preventDefault() } }}
+        className="relative"
+      >
+        {children}
+      </motion.div>
+    </div>
+  )
+}
+
+function SwipeHint() {
+  const [show] = useState(() => {
+    try { return !localStorage.getItem(SWIPE_HINT_KEY) } catch { return false }
+  })
+  if (!show) return null
+  return (
+    <p className="sm:hidden text-[12px] text-faint px-0 pt-2">
+      Glisse une série vers la gauche pour la supprimer, vers la droite pour la dupliquer.
+    </p>
   )
 }

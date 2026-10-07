@@ -12,11 +12,11 @@ export default defineConfig({
       injectRegister: false,
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
-        name: 'Fit Tracker',
+        name: 'Fit — carnet d’entraînement',
         short_name: 'Fit',
-        description: 'Suivi musculation & poids corporel',
-        theme_color: '#0A0A0B',
-        background_color: '#0A0A0B',
+        description: 'Séries, charges, pesées et course : ton carnet d’entraînement.',
+        theme_color: '#000000',
+        background_color: '#000000',
         display: 'standalone',
         orientation: 'portrait',
         start_url: '/',
@@ -27,7 +27,7 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,webp}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,webp,woff2}'],
       },
       devOptions: {
         enabled: false,

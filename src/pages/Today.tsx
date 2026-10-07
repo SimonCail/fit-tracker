@@ -1,50 +1,47 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowRight, Dumbbell, Flame, Footprints, Plus, Scale, Trophy, ChevronRight, CalendarPlus, Sunrise, Moon, Pencil, Check, X } from 'lucide-react'
-import { differenceInCalendarDays, format, parseISO } from 'date-fns'
+import { ArrowRight, CalendarPlus, ChevronRight, Moon, Sunrise, X } from 'lucide-react'
+import { addDays, differenceInCalendarDays, format, isToday, parseISO, startOfWeek, subDays } from 'date-fns'
 import { fr } from 'date-fns/locale'
-import { motion } from 'framer-motion'
 import {
   Button,
   Card,
+  Disc,
   EmptyState,
+  ErrorNote,
   Input,
-  Skeleton,
   Label,
   Modal,
   ModalContent,
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
+  ModalTitle,
+  Segmented,
+  SectionTitle,
+  Skeleton,
   useConfirm,
 } from '../components/ui'
-import {
-  createSession,
-  deleteWeighIn,
-  duplicateSession,
-  findOrCreateSessionOnDate,
-  listSessions,
-  listWeighIns,
-  setWeighIn,
-} from '../lib/db'
-import type { Session, SessionType, WeighIn, WeighSlot } from '../lib/types'
-import { formatWeight, fromKg, parseDecimal, round, toKg } from '../lib/units'
+import { PageHeader } from '../components/Layout'
+import { useLayout } from '../components/layoutContext'
+import { deleteWeighIn, findOrCreateSessionOnDate, listSessions, listWeighIns, setWeighIn } from '../lib/db'
+import type { Session, WeighIn, WeighSlot } from '../lib/types'
+import { frNum, fromKg, parseDecimal, round, toKg } from '../lib/units'
 import { setTotalReps, setVolumeKg } from '../lib/setMath'
 import { dateToDayKey, useSettings } from '../store/settings'
 import { maybeFireReminder } from '../lib/notifications'
 import { MonthlyCalendar } from '../components/MonthlyCalendar'
+import { weeklyAverage } from '../lib/weightTrend'
+import { cn } from '../lib/cn'
 
 const todayIso = () => format(new Date(), 'yyyy-MM-dd')
-const yesterdayIso = () => format(new Date(Date.now() - 86_400_000), 'yyyy-MM-dd')
 
 export function Today() {
   const nav = useNavigate()
+  const { openNewSession } = useLayout()
   const { unit, profile, weeklyPlan, reminders } = useSettings()
   const [loading, setLoading] = useState(true)
   const [sessions, setSessions] = useState<Session[]>([])
   const [weighIns, setWeighIns] = useState<WeighIn[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [datePickerOpen, setDatePickerOpen] = useState(false)
+  const [starting, setStarting] = useState(false)
 
   async function load() {
     setError(null)
@@ -61,15 +58,10 @@ export function Today() {
   useEffect(() => { load() }, [])
 
   const todayKey = todayIso()
-  // When multiple sessions exist today (e.g. muscu + course), pick the most recent for the primary CTA.
-  const todaySessionsList = sessions.filter(s => s.date === todayKey).sort((a, b) => b.createdAt - a.createdAt)
-  const todaySession = todaySessionsList[0]
-  const hasMultipleToday = todaySessionsList.length > 1
-  const todayMorning = weighIns.find(w => w.date === todayKey && w.slot === 'morning')
-  const todayEvening = weighIns.find(w => w.date === todayKey && w.slot === 'evening')
+  const todaySessions = sessions.filter(s => s.date === todayKey).sort((a, b) => b.createdAt - a.createdAt)
+  const todaySession = todaySessions[0]
   const todayPlan = weeklyPlan[dateToDayKey(new Date())]
 
-  // Reminder notification: check on mount + when tab becomes visible
   useEffect(() => {
     function check() {
       if (document.visibilityState !== 'visible') return
@@ -84,8 +76,8 @@ export function Today() {
     document.addEventListener('visibilitychange', check)
     return () => document.removeEventListener('visibilitychange', check)
   }, [reminders.enabled, reminders.time, weeklyPlan, todaySession])
-  const lastWeighIn = weighIns[0]
-  const userBwKg = lastWeighIn?.weight ?? 0
+
+  const userBwKg = weighIns[0]?.weight ?? 0
   const weekSessions = sessions.filter(s => differenceInCalendarDays(new Date(), parseISO(s.date)) < 7)
   const weekVolume = weekSessions.reduce((acc, s) => {
     for (const ex of s.exercises) {
@@ -102,310 +94,288 @@ export function Today() {
   }, [sessions])
   const weighInDates = useMemo(() => weighIns.map(w => w.date), [weighIns])
 
-  async function goToSession(date: string, type: SessionType = 'strength') {
-    const s = await findOrCreateSessionOnDate(date, type)
-    nav(`/session/${s.id}`)
+  async function startToday() {
+    if (todaySession) return nav(`/session/${todaySession.id}`)
+    setStarting(true)
+    try {
+      const s = await findOrCreateSessionOnDate(todayKey, 'strength')
+      nav(`/session/${s.id}`)
+    } finally {
+      setStarting(false)
+    }
   }
 
-  const greeting = getGreeting(profile.name)
+  const header = (
+    <PageHeader
+      kicker={format(new Date(), 'EEEE d MMMM', { locale: fr })}
+      title={greeting(profile.name)}
+    />
+  )
 
-  if (loading) return <TodaySkeleton />
-
-  if (error) {
-    return (
-      <div className="py-10">
-        <Card className="p-5 border-[color:var(--color-danger)]/40">
-          <p className="font-medium text-[color:var(--color-danger)] mb-1">Erreur de chargement</p>
-          <p className="text-sm text-[color:var(--color-text-dim)] break-words">{error}</p>
-        </Card>
-      </div>
-    )
-  }
+  if (loading) return <>{header}<TodaySkeleton /></>
+  if (error) return <>{header}<ErrorNote message={error} /></>
 
   return (
     <>
-      <motion.div
-        initial="hidden"
-        animate="show"
-        variants={{ show: { transition: { staggerChildren: 0.06 } } }}
-        className="py-8 space-y-10"
-      >
-        <Section>
-          <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text-dim)] font-medium">
-            {format(new Date(), "EEEE d MMMM", { locale: fr })}
-          </p>
-          <h1 className="font-display text-5xl sm:text-6xl leading-[1.05] mt-2">{greeting}</h1>
-        </Section>
+      {header}
 
-        <Section>
-          <div className="grid grid-cols-3 gap-2 sm:gap-3">
-            <Stat value={streak} label="Streak" suffix={streak > 1 ? 'jours' : 'jour'} accent={streak > 0} icon={<Flame size={14} />} />
-            <Stat value={weekSessions.length} label="Semaine" suffix="séances" />
-            <Stat value={formatTonnage(weekVolume, unit)} label="Tonnage 7j" suffix={unit} />
-          </div>
-        </Section>
+      <div className="flex flex-col gap-8 lg:grid lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:gap-10 lg:items-start">
+        <div className="contents lg:flex lg:flex-col lg:gap-8">
+        <TodayAction
+          session={todaySession}
+          plan={todayPlan}
+          busy={starting}
+          onStart={startToday}
+          onOther={openNewSession}
+        />
 
-        <Section>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <SessionAction
-              todaySession={todaySession}
-              hasMultipleToday={hasMultipleToday}
-              todayPlan={todayPlan}
-              onToday={() => {
-                if (todaySession) nav(`/session/${todaySession.id}`)
-                else goToSession(todayKey)
-              }}
-              onPickDate={() => setDatePickerOpen(true)}
-            />
-            <WeightCard
-              unit={unit}
-              date={todayKey}
-              morning={todayMorning}
-              evening={todayEvening}
-              lastWeighIn={lastWeighIn}
-              allWeighIns={weighIns}
-              onChanged={load}
-            />
-          </div>
-        </Section>
+        <Week sessions={sessions} streak={streak} weekCount={weekSessions.length} weekVolumeKg={weekVolume} unit={unit} />
 
-        <Section>
-          <Label className="block mb-3">Calendrier</Label>
-          <Card className="p-5">
+        <WeightBlock unit={unit} weighIns={weighIns} onChanged={load} />
+        </div>
+
+        <div className="contents lg:flex lg:flex-col lg:gap-8">
+        <section>
+          <SectionTitle>Calendrier</SectionTitle>
+          <Card className="p-4 sm:p-5">
             <MonthlyCalendar
               counts={sessionCounts}
               weighInDates={weighInDates}
               onDayClick={d => nav(`/history?d=${d}`)}
             />
           </Card>
-        </Section>
+        </section>
 
         {sessions.length > 0 ? (
-          <Section>
-            <div className="flex items-baseline justify-between mb-3">
-              <Label>Récent</Label>
-              <button
-                onClick={() => nav('/history')}
-                className="text-xs text-[color:var(--color-text-dim)] hover:text-[color:var(--color-text)] flex items-center gap-1 cursor-pointer transition-colors"
-              >
-                Tout voir <ArrowRight size={12} />
-              </button>
-            </div>
-            <div className="space-y-2">
+          <section>
+            <SectionTitle
+              action={
+                <button onClick={() => nav('/history')} className="text-[14px] link">
+                  Tout le journal
+                </button>
+              }
+            >
+              Dernières séances
+            </SectionTitle>
+            <Card className="overflow-hidden">
               {sessions.slice(0, 5).map(s => (
-                <SessionRow key={s.id} session={s} onClick={() => nav(`/session/${s.id}`)} showDate />
+                <SessionRow key={s.id} session={s} onClick={() => nav(`/session/${s.id}`)} />
               ))}
-            </div>
-          </Section>
+            </Card>
+          </section>
         ) : (
           <EmptyState
-            icon={<Trophy size={32} />}
-            title="Prêt pour la première ?"
-            subtitle="Commence par loguer une séance ou enregistrer ton poids. Ton évolution se dessinera toute seule."
+            title="Ton journal est vide"
+            subtitle="Lance ta première séance ou note ton poids du matin : tout ce que tu enregistres apparaîtra ici."
           />
         )}
-      </motion.div>
-
-      <DatePickerModal
-        open={datePickerOpen}
-        onOpenChange={setDatePickerOpen}
-        sessions={sessions}
-        onPick={async (date, sourceId, type) => {
-          setDatePickerOpen(false)
-          if (sourceId) {
-            const s = await duplicateSession(sourceId, date)
-            nav(`/session/${s.id}`)
-          } else {
-            // Always create a fresh new session (don't reuse) — this entry point is for NEW sessions.
-            const s = await createSession(date, null, type)
-            nav(`/session/${s.id}`)
-          }
-        }}
-      />
+        </div>
+      </div>
     </>
   )
 }
 
-function Section({ children }: { children: React.ReactNode }) {
+/* ── Today's main action ─────────────────────────────────────────────── */
+
+function TodayAction({
+  session,
+  plan,
+  busy,
+  onStart,
+  onOther,
+}: {
+  session?: Session
+  plan?: string | null
+  busy: boolean
+  onStart: () => void
+  onOther: () => void
+}) {
+  const running = session?.type === 'running'
+  const sets = session?.exercises.reduce((n, e) => n + e.sets.length, 0) ?? 0
+
+  let overline: string
+  let title: string
+  let detail: string | null = null
+  if (session) {
+    overline = 'Séance en cours'
+    title = session.notes || (running ? 'Course' : plan || 'Séance du jour')
+    detail = running
+      ? session.distanceMeters ? `${frNum(session.distanceMeters / 1000, 2)} km` : 'Distance à renseigner'
+      : session.exercises.length === 0
+        ? 'Aucun exercice pour l’instant'
+        : `${session.exercises.length} exercice${session.exercises.length > 1 ? 's' : ''}, ${sets} série${sets > 1 ? 's' : ''}`
+  } else {
+    overline = plan ? 'Au programme aujourd’hui' : 'Rien de prévu aujourd’hui'
+    title = plan || 'Commencer une séance'
+  }
+
   return (
-    <motion.section
-      variants={{
-        hidden: { opacity: 0, y: 12 },
-        show: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } },
-      }}
-    >
-      {children}
-    </motion.section>
+    <section>
+      <Card className="p-5">
+        <div className="flex items-start gap-4">
+          <Disc
+            plate={running ? 'run' : 'lift'}
+            empty={!session}
+            size={56}
+            className="mt-0.5"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="text-[14px] text-dim">{overline}</p>
+            <p className="t-title text-[28px] mt-1 break-words">{title}</p>
+            {detail && <p className="text-[14px] text-dim mt-1.5">{detail}</p>}
+          </div>
+        </div>
+        <div className="mt-5 flex gap-2">
+          <Button size="lg" className="flex-1" onClick={onStart} disabled={busy}>
+            {busy ? 'Ouverture…' : session ? 'Reprendre' : 'Commencer'}
+            <ArrowRight size={18} strokeWidth={2.4} />
+          </Button>
+          <Button size="lg" variant="secondary" onClick={onOther} aria-label="Autre jour, course ou séance modèle" className="px-4">
+            <CalendarPlus size={18} />
+            <span className="hidden min-[400px]:inline">Autre</span>
+          </Button>
+        </div>
+      </Card>
+    </section>
   )
 }
 
-function Stat({
-  value,
-  label,
-  suffix,
-  accent,
-  icon,
+/* ── Week strip ──────────────────────────────────────────────────────── */
+
+function Week({
+  sessions,
+  streak,
+  weekCount,
+  weekVolumeKg,
+  unit,
 }: {
-  value: number | string
-  label: string
-  suffix?: string
-  accent?: boolean
-  icon?: React.ReactNode
+  sessions: Session[]
+  streak: number
+  weekCount: number
+  weekVolumeKg: number
+  unit: 'kg' | 'lb'
 }) {
+  const monday = startOfWeek(new Date(), { weekStartsOn: 1 })
+  const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i))
+  const byDay = new Map<string, Session[]>()
+  for (const s of sessions) {
+    const arr = byDay.get(s.date) ?? []
+    arr.push(s)
+    byDay.set(s.date, arr)
+  }
+  const tonnage = fromKg(weekVolumeKg, unit)
+
   return (
-    <Card className="p-4 flex flex-col h-full min-w-0 transition-colors hover:border-[color:var(--color-border-strong)]">
-      <div className="flex items-center gap-1.5 mb-3 min-w-0">
-        {icon && (
-          <span className={`shrink-0 ${accent ? 'text-[color:var(--color-accent)]' : 'text-[color:var(--color-text-dim)]'}`}>{icon}</span>
-        )}
-        <p className="text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-text-dim)] font-medium whitespace-nowrap truncate">
-          {label}
-        </p>
-      </div>
-      <p className={`font-display text-3xl sm:text-4xl tabular leading-none mt-auto ${accent ? 'text-[color:var(--color-accent)]' : ''}`}>
-        {value}
-      </p>
-      {suffix && <p className="text-xs text-[color:var(--color-text-dim)] mt-1 truncate">{suffix}</p>}
-    </Card>
+    <section>
+      <SectionTitle>Cette semaine</SectionTitle>
+      <Card className="px-3 pt-4 pb-1">
+        <ol className="grid grid-cols-7">
+          {days.map(d => {
+            const key = format(d, 'yyyy-MM-dd')
+            const list = byDay.get(key) ?? []
+            const today = isToday(d)
+            const future = d > new Date() && !today
+            const hasRun = list.some(s => s.type === 'running')
+            const hasLift = list.some(s => s.type !== 'running')
+            return (
+              <li key={key} className="flex flex-col items-center gap-2" aria-label={`${format(d, 'EEEE', { locale: fr })} : ${list.length ? `${list.length} séance${list.length > 1 ? 's' : ''}` : 'aucune séance'}`}>
+                <span className={cn('text-[12px] font-semibold capitalize', today ? 'text-ink' : 'text-faint')}>
+                  {format(d, 'EEEEE', { locale: fr })}
+                </span>
+                <span className={cn('relative grid place-items-center h-9 w-9 rounded-full', today && 'ring-2 ring-ink ring-offset-2 ring-offset-surface')}>
+                  {hasLift && hasRun ? (
+                    <span className="relative w-7 h-7">
+                      <Disc plate="lift" size={22} className="absolute left-0 top-0" />
+                      <Disc plate="run" size={18} className="absolute right-0 bottom-0" />
+                    </span>
+                  ) : hasLift ? (
+                    <Disc plate="lift" size={28} />
+                  ) : hasRun ? (
+                    <Disc plate="run" size={28} />
+                  ) : (
+                    <span className={cn(future && 'opacity-40')}><Disc empty size={26} /></span>
+                  )}
+                </span>
+                <span className={cn('text-[12px] num-light', today ? 'text-ink' : 'text-faint')}>{format(d, 'd')}</span>
+              </li>
+            )
+          })}
+        </ol>
+        <dl className="grid grid-cols-3 mt-3 hairline-t">
+          <Figure value={String(streak)} unit={streak > 1 ? 'jours' : 'jour'} label="d’affilée" />
+          <Figure value={String(weekCount)} unit={weekCount > 1 ? 'séances' : 'séance'} label="en 7 jours" />
+          <Figure
+            value={tonnage >= 1000 ? frNum(tonnage / 1000, 1) : String(Math.round(tonnage))}
+            unit={tonnage >= 1000 ? (unit === 'kg' ? 't' : 'k lb') : unit}
+            label="soulevées"
+          />
+        </dl>
+      </Card>
+    </section>
   )
 }
 
-function SessionAction({
-  todaySession,
-  hasMultipleToday,
-  todayPlan,
-  onToday,
-  onPickDate,
-}: {
-  todaySession?: Session
-  hasMultipleToday?: boolean
-  todayPlan?: string | null
-  onToday: () => void
-  onPickDate: () => void
-}) {
-  const hasToday = !!todaySession
-  const typeLabel = todaySession?.type === 'running' ? 'course' : 'muscu'
-  const title = hasToday
-    ? hasMultipleToday
-      ? `Reprendre (${typeLabel})`
-      : 'Reprendre la séance'
-    : todayPlan || 'Commencer la séance'
-  const subtitle = hasToday
-    ? hasMultipleToday
-      ? `Plus récente · ${todaySession?.notes || typeLabel}`
-      : (todaySession?.notes || `Séance ${typeLabel} du jour`)
-    : todayPlan
-      ? 'Planifié aujourd\'hui'
-      : "Logue ton entraînement d'aujourd'hui"
+function Figure({ value, unit, label }: { value: string; unit: string; label: string }) {
   return (
-    <div className="relative group h-full">
-      <button
-        onClick={onToday}
-        className="h-full w-full flex flex-col text-left rounded-2xl p-5 bg-[color:var(--color-accent-fill)] text-[color:var(--color-accent-text)] border border-[color:var(--color-accent-fill)] transition-all duration-200 cursor-pointer hover:-translate-y-0.5 hover:bg-[color:var(--color-accent-fill-hover)] hover:shadow-[0_16px_40px_-12px_color-mix(in_srgb,var(--color-accent-fill)_55%,transparent)] active:translate-y-0 active:scale-[0.99]"
-      >
-        <div className="flex items-center justify-between">
-          <span className="w-10 h-10 rounded-2xl bg-[color:var(--color-accent-text)]/10 flex items-center justify-center">
-            {hasToday ? <Pencil size={18} /> : <Plus size={18} />}
-          </span>
-          <ArrowRight size={16} className="opacity-60 group-hover:translate-x-1 transition-transform" />
-        </div>
-        <div className="mt-auto pt-6">
-          <p className="font-display text-2xl leading-tight font-semibold">{title}</p>
-          <p className="text-sm mt-1 opacity-75">{subtitle}</p>
-        </div>
-      </button>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            onClick={onPickDate}
-            className="absolute top-4 right-4 h-8 px-2.5 rounded-full bg-[color:var(--color-accent-text)]/10 hover:bg-[color:var(--color-accent-text)]/20 transition-colors cursor-pointer text-[color:var(--color-accent-text)] flex items-center gap-1.5 text-xs font-medium"
-            aria-label="Antidater une séance"
-          >
-            <CalendarPlus size={14} />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="left">Antidater</TooltipContent>
-      </Tooltip>
+    <div className="px-2 py-3.5 text-center">
+      <dd className="flex items-baseline justify-center gap-1">
+        <span className="num text-[32px]">{value}</span>
+        <span className="text-[13px] font-semibold text-dim">{unit}</span>
+      </dd>
+      <dt className="text-[12px] text-faint mt-1 leading-tight">{label}</dt>
     </div>
   )
 }
 
-function WeightCard({
-  unit,
-  date,
-  morning,
-  evening,
-  lastWeighIn,
-  allWeighIns,
-  onChanged,
-}: {
-  unit: 'kg' | 'lb'
-  date: string
-  morning?: WeighIn
-  evening?: WeighIn
-  lastWeighIn?: WeighIn
-  allWeighIns: WeighIn[]
-  onChanged: () => void
-}) {
-  const [antedateOpen, setAntedateOpen] = useState(false)
+/* ── Body weight ─────────────────────────────────────────────────────── */
+
+function WeightBlock({ unit, weighIns, onChanged }: { unit: 'kg' | 'lb'; weighIns: WeighIn[]; onChanged: () => void }) {
+  const [otherOpen, setOtherOpen] = useState(false)
+  const today = todayIso()
+  const slotOf = (w: WeighIn) => w.slot ?? 'morning'
+  const entry = (slot: WeighSlot) => weighIns.find(w => w.date === today && slotOf(w) === slot)
+  const avg = weeklyAverage(weighIns, weighIns.some(w => (w.slot ?? 'morning') === 'morning') ? 'morning' : 'evening')
+  const previous = (slot: WeighSlot) =>
+    weighIns.filter(w => w.date < today && slotOf(w) === slot).sort((a, b) => b.date.localeCompare(a.date))[0]
+
   return (
-    <Card className="p-5 flex flex-col">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <span className="w-10 h-10 rounded-2xl bg-[color:var(--color-accent-soft)] text-[color:var(--color-accent)] flex items-center justify-center">
-            <Scale size={18} />
-          </span>
-          <div>
-            <p className="font-display text-lg leading-tight">Poids</p>
-            {lastWeighIn && !morning && !evening && (
-              <p className="text-xs text-[color:var(--color-text-dim)]">
-                dernier: {formatWeight(lastWeighIn.weight, unit, 1)}
-              </p>
+    <section>
+      <SectionTitle
+        action={
+          <button
+            onClick={() => setOtherOpen(true)}
+            className="text-[14px] link"
+          >
+            Autre date
+          </button>
+        }
+      >
+        Poids
+      </SectionTitle>
+      <Card className="overflow-hidden">
+        <WeightSlotRow icon={<Sunrise size={18} />} label="Matin" slot="morning" date={today} unit={unit} entry={entry('morning')} previous={previous('morning')} onChanged={onChanged} />
+        <WeightSlotRow icon={<Moon size={18} />} label="Soir" slot="evening" date={today} unit={unit} entry={entry('evening')} previous={previous('evening')} onChanged={onChanged} />
+        {avg.now !== null && (
+          <div className="flex items-baseline gap-2 px-4 py-3 hairline-t text-[13px] text-dim">
+            <span>Moyenne sur 7 jours</span>
+            <span className="num-light text-[18px] text-ink ml-auto">{frNum(fromKg(avg.now, unit), 1)}</span>
+            <span className="font-semibold">{unit}</span>
+            {avg.delta !== null && Math.abs(avg.delta) >= 0.05 && (
+              <span className="num-light text-[17px] text-faint">
+                {avg.delta > 0 ? '+' : '−'}{frNum(Math.abs(fromKg(avg.delta, unit)), 1)}
+              </span>
             )}
           </div>
-        </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => setAntedateOpen(true)}
-              className="p-2 rounded-full text-[color:var(--color-text-dim)] hover:text-[color:var(--color-text)] hover:bg-[color:var(--color-surface-2)] transition-colors cursor-pointer"
-              aria-label="Antidater une pesée"
-            >
-              <CalendarPlus size={16} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="left">Antidater</TooltipContent>
-        </Tooltip>
-        <WeighInAntedateModal
-          open={antedateOpen}
-          onOpenChange={setAntedateOpen}
-          unit={unit}
-          allWeighIns={allWeighIns}
-          onSaved={() => { setAntedateOpen(false); onChanged() }}
-        />
-      </div>
-
-      <div className="space-y-2 mt-auto">
-        <WeightSlotRow
-          icon={<Sunrise size={14} />}
-          label="Matin"
-          slot="morning"
-          date={date}
-          unit={unit}
-          entry={morning}
-          onChanged={onChanged}
-        />
-        <WeightSlotRow
-          icon={<Moon size={14} />}
-          label="Soir"
-          slot="evening"
-          date={date}
-          unit={unit}
-          entry={evening}
-          onChanged={onChanged}
-        />
-      </div>
-    </Card>
+        )}
+      </Card>
+      <WeighInOtherDate
+        open={otherOpen}
+        onOpenChange={setOtherOpen}
+        unit={unit}
+        allWeighIns={weighIns}
+        onSaved={() => { setOtherOpen(false); onChanged() }}
+      />
+    </section>
   )
 }
 
@@ -416,6 +386,7 @@ function WeightSlotRow({
   date,
   unit,
   entry,
+  previous,
   onChanged,
 }: {
   icon: React.ReactNode
@@ -424,6 +395,7 @@ function WeightSlotRow({
   date: string
   unit: 'kg' | 'lb'
   entry?: WeighIn
+  previous?: WeighIn
   onChanged: () => void
 }) {
   const confirm = useConfirm()
@@ -432,7 +404,8 @@ function WeightSlotRow({
   const [saving, setSaving] = useState(false)
 
   function open() {
-    setValue(entry ? String(round(fromKg(entry.weight, unit), 1)) : '')
+    const seed = entry ?? previous
+    setValue(seed ? frNum(fromKg(seed.weight, unit), 1) : '')
     setEditing(true)
   }
 
@@ -440,7 +413,6 @@ function WeightSlotRow({
     e.preventDefault()
     const n = parseDecimal(value)
     if (Number.isNaN(n) || n <= 0) return
-    // Clamp to a sane body-weight range to avoid absurd entries.
     const kg = toKg(n, unit)
     if (kg < 20 || kg > 400) return
     setSaving(true)
@@ -465,287 +437,73 @@ function WeightSlotRow({
     onChanged()
   }
 
+  const delta = entry && previous ? round(fromKg(entry.weight - previous.weight, unit), 1) : null
+
   if (editing) {
     return (
-      <form onSubmit={save} className="flex items-center gap-1.5">
+      <form onSubmit={save} className="flex items-center gap-2 px-4 py-3 hairline-b last:shadow-none">
+        <span className="text-weigh shrink-0">{icon}</span>
         <div className="relative flex-1 min-w-0">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium pointer-events-none">
-            {label}
-          </span>
           <Input
             type="text"
             value={value}
             onChange={e => setValue(e.target.value)}
             autoFocus
+            onFocus={e => e.currentTarget.select()}
             inputMode="decimal"
             pattern="[0-9]*[.,]?[0-9]*"
             autoComplete="off"
-            placeholder="0.0"
-            className="h-11 pl-[3.75rem] pr-10 text-lg font-semibold tabular min-w-0"
+            placeholder="0,0"
+            aria-label={`Poids du ${label.toLowerCase()}`}
+            className="num text-[24px] pr-12 h-12"
           />
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium pointer-events-none">
-            {unit}
-          </span>
+          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[14px] font-semibold text-dim pointer-events-none">{unit}</span>
         </div>
-        <Button type="submit" variant="accent" size="icon-sm" disabled={saving || !value} aria-label="Enregistrer" className="shrink-0">
-          <Check size={14} />
-        </Button>
-        <Button type="button" variant="ghost" size="icon-sm" onClick={() => setEditing(false)} aria-label="Annuler" className="shrink-0">
-          <X size={14} />
+        <Button type="submit" size="md" disabled={saving || !value}>OK</Button>
+        <Button type="button" variant="ghost" size="icon" onClick={() => setEditing(false)} aria-label="Annuler">
+          <X size={18} />
         </Button>
       </form>
     )
   }
 
-  if (entry) {
+  if (!entry) {
     return (
-      <div className="group flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-[color:var(--color-surface-2)]/60 transition-colors">
-        <span className="text-[color:var(--color-text-dim)] shrink-0">{icon}</span>
-        <span className="text-xs text-[color:var(--color-text-dim)] w-10 shrink-0 uppercase tracking-widest font-medium">{label}</span>
-        <span className="font-display text-lg tabular flex-1 min-w-0 truncate">
-          {round(fromKg(entry.weight, unit), 1)}
-          <span className="text-xs text-[color:var(--color-text-dim)] ml-1">{unit}</span>
-        </span>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={open}
-              className="p-1.5 rounded-full text-[color:var(--color-text-dim)] hover:text-[color:var(--color-text)] hover:bg-[color:var(--color-surface)] transition-colors cursor-pointer opacity-60 group-hover:opacity-100 shrink-0"
-              aria-label="Modifier"
-            >
-              <Pencil size={13} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">Modifier</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={remove}
-              className="p-1.5 rounded-full text-[color:var(--color-text-dim)] hover:text-[color:var(--color-danger)] hover:bg-[color:var(--color-danger)]/10 transition-colors cursor-pointer opacity-60 group-hover:opacity-100 shrink-0"
-              aria-label="Supprimer"
-            >
-              <X size={13} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">Supprimer</TooltipContent>
-        </Tooltip>
-      </div>
+      <button
+        onClick={open}
+        className="w-full flex items-center gap-3 px-4 h-[64px] hairline-b last:shadow-none text-left cursor-pointer active:bg-surface-2"
+      >
+        <span className="text-faint">{icon}</span>
+        <span className="font-semibold flex-1">{label}</span>
+        <span className="text-[14px] link">Noter</span>
+      </button>
     )
   }
 
   return (
-    <button
-      onClick={open}
-      className="w-full flex items-center gap-3 px-3 py-2 rounded-xl border border-dashed border-[color:var(--color-border)] hover:border-[color:var(--color-accent)] hover:bg-[color:var(--color-accent-soft)] text-[color:var(--color-text-dim)] hover:text-[color:var(--color-accent)] transition-colors cursor-pointer"
-    >
-      <span>{icon}</span>
-      <span className="text-xs uppercase tracking-widest w-10 font-medium">{label}</span>
-      <span className="text-sm flex-1 text-left">Ajouter</span>
-      <Plus size={14} />
-    </button>
-  )
-}
-
-function SessionRow({
-  session,
-  onClick,
-  showDate,
-}: {
-  session: Session
-  onClick: () => void
-  showDate?: boolean
-}) {
-  const totalSets = session.exercises.reduce((n, e) => n + e.sets.length, 0)
-  return (
-    <button
-      onClick={onClick}
-      className="group w-full text-left flex items-center gap-4 py-3 border-b border-[color:var(--color-border)] last:border-b-0 hover:bg-[color:var(--color-surface-2)]/60 rounded-xl px-2 -mx-2 transition-all duration-200 cursor-pointer"
-    >
-      <div className="font-display text-2xl tabular w-12 text-center text-[color:var(--color-text-dim)] group-hover:text-[color:var(--color-accent)] transition-colors">
-        {format(new Date(session.date), 'dd')}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="font-medium truncate">{session.notes || 'Séance'}</p>
-        <p className="text-xs text-[color:var(--color-text-dim)] capitalize">
-          {showDate ? format(new Date(session.date), 'EEEE d MMM', { locale: fr }) : format(new Date(session.createdAt), 'HH:mm')}
-          {' · '}
-          {session.exercises.length} exos · {totalSets} séries
-        </p>
-      </div>
-      <ChevronRight size={16} className="text-[color:var(--color-text-dim)] group-hover:text-[color:var(--color-text)] group-hover:translate-x-1 transition-transform" />
-    </button>
-  )
-}
-
-function DatePickerModal({
-  open,
-  onOpenChange,
-  sessions,
-  onPick,
-}: {
-  open: boolean
-  onOpenChange: (o: boolean) => void
-  sessions: Session[]
-  onPick: (date: string, sourceId: string | null, type: SessionType) => void
-}) {
-  const [date, setDate] = useState(todayIso())
-  const [sourceId, setSourceId] = useState<string | null>(null)
-  const [type, setType] = useState<SessionType>('strength')
-  const existingSameType = useMemo(
-    () => sessions.some(s => s.date === date && s.type === type && s.exercises.length > 0),
-    [sessions, date, type],
-  )
-  const existing = existingSameType
-
-  useEffect(() => {
-    if (open) {
-      setDate(todayIso())
-      setSourceId(null)
-      setType('strength')
-    }
-  }, [open])
-
-  // Distinct past sessions usable as templates (has at least 1 exercise).
-  const templates = useMemo(() => {
-    return sessions.filter(s => s.exercises.length > 0).slice(0, 30)
-  }, [sessions])
-
-  const actionLabel = sourceId ? 'Dupliquer' : 'Créer'
-
-  return (
-    <Modal open={open} onOpenChange={onOpenChange}>
-      <ModalContent>
-        <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text-dim)] font-medium">Nouvelle séance</p>
-        <h3 className="font-display text-2xl mt-1 font-semibold">Type, date et template</h3>
-
-        <div className="mt-5">
-          <Label className="block mb-2">Type</Label>
-          <div className="grid grid-cols-2 gap-2">
-            <TypeChoice
-              icon={<Dumbbell size={14} />}
-              label="Musculation"
-              selected={type === 'strength'}
-              onClick={() => setType('strength')}
-            />
-            <TypeChoice
-              icon={<Footprints size={14} />}
-              label="Course"
-              selected={type === 'running'}
-              onClick={() => { setType('running'); setSourceId(null) }}
-            />
-          </div>
-        </div>
-
-        <div className="mt-5">
-          <Label className="block mb-2">Date</Label>
-          <div className="flex gap-2 mb-2">
-            <QuickDate label="Aujourd'hui" value={todayIso()} current={date} onChange={setDate} />
-            <QuickDate label="Hier" value={yesterdayIso()} current={date} onChange={setDate} />
-          </div>
-          <Input
-            type="date"
-            value={date}
-            onChange={e => setDate(e.target.value)}
-            max={todayIso()}
-            className="h-11 w-full min-w-0"
-          />
-          {existing && (
-            <p className="text-xs text-[color:var(--color-text-dim)] mt-2 flex items-center gap-1.5">
-              ⚠ Une séance {type === 'running' ? 'course' : 'muscu'} existe déjà le {format(parseISO(date), 'd MMM', { locale: fr })} — une {sourceId ? 'nouvelle séance séparée' : 'séance vide supplémentaire'} sera créée à côté.
-            </p>
-          )}
-        </div>
-
-        {type === 'strength' && (
-          <div className="mt-5">
-            <Label className="block mb-2">Partir de</Label>
-            <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
-              <TemplateChoice
-                selected={sourceId === null}
-                title="Séance vide"
-                subtitle="Tu ajoutes les exos à la main"
-                onClick={() => setSourceId(null)}
-              />
-              {templates.map(s => (
-                <TemplateChoice
-                  key={s.id}
-                  selected={sourceId === s.id}
-                  title={s.notes || 'Séance'}
-                  subtitle={`${format(parseISO(s.date), 'd MMM', { locale: fr })} · ${s.exercises.length} exos (${s.exercises.map(e => e.name).slice(0, 2).join(', ')}${s.exercises.length > 2 ? '…' : ''})`}
-                  onClick={() => setSourceId(s.id)}
-                />
-              ))}
-            </div>
-          </div>
+    <div className="flex items-center gap-3 px-4 h-[64px] hairline-b last:shadow-none">
+      <span className="text-weigh">{icon}</span>
+      <span className="font-semibold w-14">{label}</span>
+      <button onClick={open} className="flex-1 flex items-baseline gap-1.5 text-left cursor-pointer min-w-0" aria-label={`Modifier la pesée du ${label.toLowerCase()}`}>
+        <span className="num text-[30px]">{frNum(fromKg(entry.weight, unit), 1)}</span>
+        <span className="text-[14px] font-semibold text-dim">{unit}</span>
+        {delta !== null && delta !== 0 && (
+          <span
+            className="num-light text-[17px] text-faint ml-1.5"
+            title={`Par rapport au ${format(parseISO(previous!.date), 'd MMMM', { locale: fr })}`}
+          >
+            {delta > 0 ? '+' : '−'}{frNum(Math.abs(delta), 1)}
+          </span>
         )}
-
-        <div className="mt-6 flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => onOpenChange(false)}>Annuler</Button>
-          <Button variant="accent" onClick={() => onPick(date, sourceId, type)}>
-            {actionLabel}
-          </Button>
-        </div>
-      </ModalContent>
-    </Modal>
+      </button>
+      <button onClick={remove} className="h-10 w-10 -mr-2 grid place-items-center rounded-full text-faint hover:text-danger cursor-pointer" aria-label="Supprimer">
+        <X size={18} />
+      </button>
+    </div>
   )
 }
 
-function TypeChoice({
-  icon,
-  label,
-  selected,
-  onClick,
-}: {
-  icon: React.ReactNode
-  label: string
-  selected: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`h-12 flex items-center justify-center gap-2 rounded-xl text-sm font-medium transition-all cursor-pointer active:scale-[0.97] border-2 ${
-        selected
-          ? 'border-[color:var(--color-accent)] bg-[color:var(--color-accent-soft)] text-[color:var(--color-accent)]'
-          : 'border-[color:var(--color-border)] text-[color:var(--color-text-dim)] hover:text-[color:var(--color-text)] hover:border-[color:var(--color-border-strong)]'
-      }`}
-    >
-      {icon}
-      {label}
-    </button>
-  )
-}
-
-function TemplateChoice({
-  selected,
-  title,
-  subtitle,
-  onClick,
-}: {
-  selected: boolean
-  title: string
-  subtitle: string
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`w-full text-left px-3 py-2 rounded-xl border-2 transition-colors cursor-pointer ${
-        selected
-          ? 'border-[color:var(--color-accent)] bg-[color:var(--color-accent-soft)]'
-          : 'border-[color:var(--color-border)] hover:border-[color:var(--color-border-strong)] hover:bg-[color:var(--color-surface-2)]/60'
-      }`}
-    >
-      <p className={`text-sm font-medium truncate ${selected ? 'text-[color:var(--color-accent)]' : 'text-[color:var(--color-text)]'}`}>{title}</p>
-      <p className="text-[10px] text-[color:var(--color-text-dim)] truncate">{subtitle}</p>
-    </button>
-  )
-}
-
-function WeighInAntedateModal({
+function WeighInOtherDate({
   open,
   onOpenChange,
   unit,
@@ -765,21 +523,15 @@ function WeighInAntedateModal({
 
   useEffect(() => {
     if (open) {
-      setDate(todayIso())
+      setDate(format(subDays(new Date(), 1), 'yyyy-MM-dd'))
       setSlot('morning')
-      setValue('')
     }
   }, [open])
 
-  // Prefill the weight when date+slot matches an existing entry.
   useEffect(() => {
     if (!open) return
     const existing = allWeighIns.find(w => w.date === date && (w.slot ?? 'morning') === slot)
-    if (existing) {
-      setValue(String(round(fromKg(existing.weight, unit), 1)))
-    } else {
-      setValue('')
-    }
+    setValue(existing ? frNum(fromKg(existing.weight, unit), 1) : '')
   }, [open, date, slot, allWeighIns, unit])
 
   async function save(e: React.FormEvent) {
@@ -800,106 +552,81 @@ function WeighInAntedateModal({
   return (
     <Modal open={open} onOpenChange={onOpenChange}>
       <ModalContent>
-        <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text-dim)] font-medium">Pesée</p>
-        <h3 className="font-display text-2xl mt-1 font-semibold">Ajouter pour une autre date</h3>
-
-        <form onSubmit={save} className="mt-5 space-y-4">
+        <ModalTitle className="t-title text-[26px]">Pesée à une autre date</ModalTitle>
+        <form onSubmit={save} className="mt-5 space-y-5">
           <div>
-            <Label className="block mb-2">Date</Label>
-            <div className="flex gap-2 mb-2">
-              <QuickDate label="Aujourd'hui" value={todayIso()} current={date} onChange={setDate} />
-              <QuickDate label="Hier" value={yesterdayIso()} current={date} onChange={setDate} />
-            </div>
-            <Input
-              type="date"
-              value={date}
-              onChange={e => setDate(e.target.value)}
-              max={todayIso()}
-              className="h-11 w-full min-w-0"
-            />
+            <Label htmlFor="weigh-date" className="block mb-2">Date</Label>
+            <Input id="weigh-date" type="date" value={date} onChange={e => setDate(e.target.value)} max={todayIso()} />
           </div>
-
           <div>
             <Label className="block mb-2">Moment</Label>
-            <div className="flex gap-2">
-              <SlotChoice
-                icon={<Sunrise size={14} />}
-                label="Matin"
-                selected={slot === 'morning'}
-                onClick={() => setSlot('morning')}
-              />
-              <SlotChoice
-                icon={<Moon size={14} />}
-                label="Soir"
-                selected={slot === 'evening'}
-                onClick={() => setSlot('evening')}
-              />
-            </div>
+            <Segmented
+              value={slot}
+              onChange={setSlot}
+              options={[
+                { value: 'morning', label: <><Sunrise size={16} /> Matin</> },
+                { value: 'evening', label: <><Moon size={16} /> Soir</> },
+              ]}
+            />
           </div>
-
           <div>
-            <Label className="block mb-2">Poids</Label>
+            <Label htmlFor="weigh-value" className="block mb-2">Poids</Label>
             <div className="relative">
               <Input
+                id="weigh-value"
                 type="text"
                 value={value}
                 onChange={e => setValue(e.target.value)}
-                placeholder="0.0"
+                placeholder="0,0"
                 inputMode="decimal"
                 pattern="[0-9]*[.,]?[0-9]*"
                 autoComplete="off"
-                className="h-11 pr-12 text-lg font-semibold tabular"
+                className="num text-[28px] h-14 pr-12"
               />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-widest text-[color:var(--color-text-dim)] font-medium pointer-events-none">
-                {unit}
-              </span>
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[14px] font-semibold text-dim pointer-events-none">{unit}</span>
             </div>
           </div>
-
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>Annuler</Button>
-            <Button type="submit" variant="accent" disabled={saving || !value}>
-              {saving ? '…' : 'Enregistrer'}
-            </Button>
-          </div>
+          <Button type="submit" size="lg" className="w-full" disabled={saving || !value}>
+            {saving ? 'Enregistrement…' : 'Enregistrer la pesée'}
+          </Button>
         </form>
       </ModalContent>
     </Modal>
   )
 }
 
-function SlotChoice({ icon, label, selected, onClick }: { icon: React.ReactNode; label: string; selected: boolean; onClick: () => void }) {
+/* ── Session row (shared look with the journal) ──────────────────────── */
+
+function SessionRow({ session, onClick }: { session: Session; onClick: () => void }) {
+  const running = session.type === 'running'
+  const sets = session.exercises.reduce((n, e) => n + e.sets.length, 0)
+  const sub = running
+    ? [session.route, session.distanceMeters ? `${frNum(session.distanceMeters / 1000, 1)} km` : null].filter(Boolean).join(', ') || 'Course'
+    : session.exercises.length
+      ? session.exercises.map(e => e.name).slice(0, 3).join(', ') + (session.exercises.length > 3 ? '…' : '')
+      : 'Séance vide'
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex-1 h-11 flex items-center justify-center gap-2 rounded-xl text-sm font-medium transition-all cursor-pointer active:scale-[0.97] ${
-        selected
-          ? 'bg-[color:var(--color-accent-soft)] text-[color:var(--color-accent)] border-2 border-[color:var(--color-accent)]'
-          : 'bg-[color:var(--color-surface-2)] text-[color:var(--color-text-dim)] border-2 border-[color:var(--color-border)] hover:text-[color:var(--color-text)] hover:border-[color:var(--color-border-strong)]'
-      }`}
-    >
-      {icon}
-      {label}
+    <button onClick={onClick} className="w-full text-left flex items-center gap-3.5 px-4 py-3.5 hairline-b last:shadow-none cursor-pointer active:bg-surface-2 hover:bg-surface-2/60">
+      <Disc plate={running ? 'run' : 'lift'} size={22} />
+      <span className="flex-1 min-w-0">
+        <span className="block font-semibold truncate">{session.notes || (running ? 'Course' : 'Séance')}</span>
+        <span className="block text-[13px] text-dim truncate">{sub}</span>
+      </span>
+      <span className="text-right shrink-0">
+        <span className="block text-[13px] font-semibold capitalize">{relativeDay(session.date)}</span>
+        {!running && sets > 0 && <span className="block text-[12px] text-faint">{sets} séries</span>}
+      </span>
+      <ChevronRight size={18} className="text-faint shrink-0 -mr-1" />
     </button>
   )
 }
 
-function QuickDate({ label, value, current, onChange }: { label: string; value: string; current: string; onChange: (d: string) => void }) {
-  const active = value === current
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(value)}
-      className={`flex-1 h-10 rounded-xl text-sm font-medium transition-colors cursor-pointer ${
-        active
-          ? 'bg-[color:var(--color-accent-fill)] text-[color:var(--color-accent-text)]'
-          : 'bg-[color:var(--color-surface-2)] text-[color:var(--color-text)] hover:bg-[color:var(--color-surface-2)]/70 border border-[color:var(--color-border)]'
-      }`}
-    >
-      {label}
-    </button>
-  )
+function relativeDay(iso: string): string {
+  const diff = differenceInCalendarDays(new Date(), parseISO(iso))
+  if (diff === 0) return 'aujourd’hui'
+  if (diff === 1) return 'hier'
+  if (diff < 7) return format(parseISO(iso), 'EEEE', { locale: fr })
+  return format(parseISO(iso), 'd MMM', { locale: fr })
 }
 
 function computeStreak(sessions: Session[]): number {
@@ -915,39 +642,20 @@ function computeStreak(sessions: Session[]): number {
   return streak
 }
 
-function formatTonnage(totalKg: number, unit: 'kg' | 'lb'): string {
-  const v = fromKg(totalKg, unit)
-  if (v >= 1000) return `${round(v / 1000, 1)}k`
-  return String(Math.round(v))
-}
-
-function getGreeting(name: string | null): string {
+function greeting(name: string | null): string {
   const h = new Date().getHours()
-  const who = name ? `, ${name}` : ''
-  if (h < 6) return `Bonne nuit${who}.`
-  if (h < 12) return `Bonjour${who}.`
-  if (h < 18) return `Bel après-midi${who}.`
-  return `Bonsoir${who}.`
+  const who = name ? ` ${name}` : ''
+  if (h < 5) return `Bonne nuit${who}`
+  if (h < 18) return `Bonjour${who}`
+  return `Bonsoir${who}`
 }
 
 function TodaySkeleton() {
   return (
-    <div className="py-8 space-y-10">
-      <div>
-        <Skeleton className="h-3 w-40 mb-3" />
-        <Skeleton className="h-14 w-3/4" />
-      </div>
-      <div className="grid grid-cols-3 gap-2 sm:gap-3">
-        {[0, 1, 2].map(i => <Skeleton key={i} className="h-28 rounded-2xl" />)}
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Skeleton className="h-40 rounded-2xl" />
-        <Skeleton className="h-40 rounded-2xl" />
-      </div>
-      <div>
-        <Skeleton className="h-3 w-24 mb-3" />
-        <Skeleton className="h-72 rounded-2xl" />
-      </div>
+    <div className="space-y-8">
+      <Skeleton className="h-[164px] rounded-[var(--radius-card)]" />
+      <Skeleton className="h-[190px] rounded-[var(--radius-card)]" />
+      <Skeleton className="h-[128px] rounded-[var(--radius-card)]" />
     </div>
   )
 }

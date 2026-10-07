@@ -1,6 +1,5 @@
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from 'react'
 import * as AlertDialogPrimitive from '@radix-ui/react-alert-dialog'
-import { AlertTriangle } from 'lucide-react'
 import { Button } from './button'
 import { cn } from '../../lib/cn'
 
@@ -40,41 +39,28 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
       {children}
       <AlertDialogPrimitive.Root open={open} onOpenChange={o => { if (!o) settle(false) }}>
         <AlertDialogPrimitive.Portal>
-          <AlertDialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[6px] data-[state=open]:animate-overlay-in data-[state=closed]:animate-overlay-out" />
+          <AlertDialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/60 data-[state=open]:animate-overlay-in data-[state=closed]:animate-overlay-out" />
           <AlertDialogPrimitive.Content
             className={cn(
-              'fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 w-[92vw] max-w-sm',
-              'rounded-2xl bg-[color:var(--color-surface)] border border-[color:var(--color-border)] shadow-2xl p-6',
-              'data-[state=open]:animate-modal-in data-[state=closed]:animate-modal-out',
+              'dialog-responsive fixed z-50 bg-surface outline-none',
+              'inset-x-0 bottom-0 rounded-t-[20px] px-5 pt-6 pb-[calc(env(safe-area-inset-bottom)+1.25rem)]',
+              'sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-full sm:max-w-sm sm:rounded-[var(--radius-card)] sm:p-6',
             )}
           >
-            <div className="flex items-start gap-4">
-              {opts?.danger && (
-                <div className="w-10 h-10 rounded-xl bg-[color:var(--color-danger)]/15 text-[color:var(--color-danger)] flex items-center justify-center shrink-0">
-                  <AlertTriangle size={18} />
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <AlertDialogPrimitive.Title className="font-display text-lg font-semibold tracking-tight">
-                  {opts?.title}
-                </AlertDialogPrimitive.Title>
-                {opts?.description && (
-                  <AlertDialogPrimitive.Description className="text-sm text-[color:var(--color-text-dim)] mt-1.5 leading-relaxed">
-                    {opts.description}
-                  </AlertDialogPrimitive.Description>
-                )}
-              </div>
-            </div>
-            <div className="mt-6 flex items-center justify-end gap-2">
+            <AlertDialogPrimitive.Title className="t-heading text-[19px]">
+              {opts?.title}
+            </AlertDialogPrimitive.Title>
+            {opts?.description && (
+              <AlertDialogPrimitive.Description className="text-[15px] text-dim mt-2 leading-relaxed">
+                {opts.description}
+              </AlertDialogPrimitive.Description>
+            )}
+            <div className="mt-6 grid grid-cols-2 gap-2 sm:flex sm:justify-end">
               <AlertDialogPrimitive.Cancel asChild>
                 <Button variant="secondary">{opts?.cancelLabel ?? 'Annuler'}</Button>
               </AlertDialogPrimitive.Cancel>
               <AlertDialogPrimitive.Action asChild>
-                <Button
-                  variant={opts?.danger ? 'danger' : 'accent'}
-                  onClick={() => settle(true)}
-                  className={opts?.danger ? 'bg-[color:var(--color-danger)] text-white hover:bg-[color:var(--color-danger)]/90' : ''}
-                >
+                <Button variant={opts?.danger ? 'danger' : 'primary'} onClick={() => settle(true)}>
                   {opts?.confirmLabel ?? 'Confirmer'}
                 </Button>
               </AlertDialogPrimitive.Action>

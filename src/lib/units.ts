@@ -37,3 +37,8 @@ export function parseDecimal(input: string): number {
   if (!s) return NaN
   return Number(s)
 }
+
+/** French-style number for display: 72.4 → "72,4". */
+export function frNum(v: number, digits = 1): string {
+  return String(round(v, digits)).replace('.', ',')
+}

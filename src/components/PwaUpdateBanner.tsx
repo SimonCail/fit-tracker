@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
-import { RefreshCw, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 
 const HOURLY = 60 * 60 * 1000
@@ -13,7 +13,6 @@ export function PwaUpdateBanner() {
     onRegisteredSW(_swUrl, registration) {
       if (!registration) return
       // Periodic background check + check whenever the app comes to the foreground.
-      // Listeners persist for the page lifetime by design (one-shot setup).
       window.setInterval(() => registration.update(), HOURLY)
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') registration.update()
@@ -24,7 +23,6 @@ export function PwaUpdateBanner() {
     },
   })
 
-  // Force a fresh update check on mount in case the SW was registered before this hook ran.
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return
     navigator.serviceWorker.getRegistration().then(r => r?.update()).catch(() => {})
@@ -34,31 +32,27 @@ export function PwaUpdateBanner() {
     <AnimatePresence>
       {needRefresh && (
         <motion.div
-          initial={{ y: 80, opacity: 0 }}
+          initial={{ y: 40, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          exit={{ y: 80, opacity: 0 }}
+          exit={{ y: 40, opacity: 0 }}
           transition={{ type: 'spring', stiffness: 380, damping: 32 }}
-          className="fixed left-4 right-4 sm:left-auto sm:right-4 sm:w-80 bottom-[max(7.5rem,calc(env(safe-area-inset-bottom)+5rem))] sm:bottom-6 z-50"
+          className="fixed left-3 right-3 sm:left-auto sm:right-6 sm:w-96 bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] sm:bottom-6 z-50"
+          role="status"
         >
-          <div className="rounded-2xl bg-[color:var(--color-accent-fill)] text-[color:var(--color-accent-text)] shadow-2xl px-4 py-3 flex items-center gap-3">
-            <RefreshCw size={16} className="shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold leading-tight">Nouvelle version dispo</p>
-              <p className="text-[11px] opacity-75 leading-tight mt-0.5">Tape pour recharger l'app</p>
-            </div>
+          <div className="rounded-[12px] bg-ink text-bg pl-4 pr-2 py-2 flex items-center gap-2 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.6)]">
+            <p className="flex-1 min-w-0 text-[14px] font-semibold">Une nouvelle version est prête</p>
             <button
               onClick={() => updateServiceWorker(true)}
-              className="px-3 h-8 rounded-full bg-[color:var(--color-accent-text)]/15 hover:bg-[color:var(--color-accent-text)]/25 active:scale-95 text-xs font-semibold transition cursor-pointer"
-              aria-label="Mettre à jour l'app"
+              className="h-10 px-4 rounded-[12px] bg-bg text-ink text-[14px] font-semibold cursor-pointer active:scale-95 transition-transform"
             >
               Mettre à jour
             </button>
             <button
               onClick={() => setNeedRefresh(false)}
-              className="p-1 rounded-full text-[color:var(--color-accent-text)]/70 hover:text-[color:var(--color-accent-text)] active:scale-90 transition cursor-pointer"
-              aria-label="Fermer"
+              className="h-10 w-10 grid place-items-center rounded-full opacity-70 hover:opacity-100 cursor-pointer"
+              aria-label="Plus tard"
             >
-              <X size={14} />
+              <X size={18} />
             </button>
           </div>
         </motion.div>

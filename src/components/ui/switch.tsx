@@ -5,12 +5,12 @@ export function Switch({ className, ...props }: SwitchPrimitive.SwitchProps) {
   return (
     <SwitchPrimitive.Root
       className={cn(
-        'peer inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-accent)] data-[state=checked]:bg-[color:var(--color-accent-fill)] data-[state=checked]:border-[color:var(--color-accent-fill)]',
+        'peer inline-flex h-[30px] w-[50px] shrink-0 cursor-pointer items-center rounded-full bg-line-strong transition-colors data-[state=checked]:bg-ink',
         className,
       )}
       {...props}
     >
-      <SwitchPrimitive.Thumb className="pointer-events-none block h-5 w-5 rounded-full bg-white shadow-sm transition-transform data-[state=checked]:translate-x-5 data-[state=unchecked]:translate-x-0.5" />
+      <SwitchPrimitive.Thumb className="pointer-events-none block h-[26px] w-[26px] rounded-full bg-white data-[state=checked]:bg-bg shadow-[0_2px_6px_rgba(0,0,0,0.25)] transition-transform duration-200 data-[state=checked]:translate-x-[22px] data-[state=unchecked]:translate-x-[2px]" />
     </SwitchPrimitive.Root>
   )
 }

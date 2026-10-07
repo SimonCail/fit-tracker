@@ -1,10 +1,11 @@
 import {
-  addDoc,
   collection,
   deleteDoc,
   doc,
   getDoc,
+  getDocFromCache,
   getDocs,
+  getDocsFromCache,
   limit,
   orderBy,
   query,
@@ -18,6 +19,22 @@ import { auth, db } from './firebase'
 import type { Exercise, ExerciseSet, Session, SessionType, SetDrop, WeighIn, WeighSlot } from './types'
 import { isBodyweightExerciseName } from './exerciseName'
 import { setMaxWeightKg, setVolumeKg } from './setMath'
+import { isOffline, trackWrite } from './sync'
+import type { DocumentReference, Query } from 'firebase/firestore'
+
+/** Reads go straight to the local cache when the device knows it is offline. */
+async function readDoc(ref: DocumentReference) {
+  if (isOffline()) {
+    try { return await getDocFromCache(ref) } catch { /* not cached: fall through */ }
+  }
+  return getDoc(ref)
+}
+async function readDocs(q: Query) {
+  if (isOffline()) {
+    try { return await getDocsFromCache(q) } catch { /* fall through */ }
+  }
+  return getDocs(q)
+}
 
 function uid(): string {
   const u = auth.currentUser
@@ -71,7 +88,7 @@ function parseWeighIn(id: string, data: Record<string, unknown>): WeighIn {
 
 export async function listSessions(max = 60): Promise<Session[]> {
   const q = query(sessionsCol(), orderBy('createdAt', 'desc'), limit(max))
-  const snap = await getDocs(q)
+  const snap = await readDocs(q)
   return snap.docs
     .map(d => parseSession(d.id, d.data()))
     .sort((a, b) => {
@@ -81,7 +98,7 @@ export async function listSessions(max = 60): Promise<Session[]> {
 }
 
 export async function getSession(id: string): Promise<Session | null> {
-  const snap = await getDoc(sessionRef(id))
+  const snap = await readDoc(sessionRef(id))
   if (!snap.exists()) return null
   return parseSession(snap.id, snap.data())
 }
@@ -91,13 +108,14 @@ export async function createSession(
   notes: string | null = null,
   type: SessionType = 'strength',
 ): Promise<Session> {
-  const docRef = await addDoc(sessionsCol(), {
+  const docRef = doc(sessionsCol())
+  await trackWrite(setDoc(docRef, {
     date,
     notes,
     type,
     exercises: [],
     createdAt: serverTimestamp(),
-  })
+  }))
   return { id: docRef.id, date, notes, type, exercises: [], createdAt: Date.now() }
 }
 
@@ -108,7 +126,7 @@ export async function createSession(
  */
 export async function findOrCreateSessionOnDate(date: string, type: SessionType = 'strength'): Promise<Session> {
   const q = query(sessionsCol(), where('date', '==', date), limit(10))
-  const snap = await getDocs(q)
+  const snap = await readDocs(q)
   for (const doc of snap.docs) {
     const s = parseSession(doc.id, doc.data())
     if (s.type === type) return s
@@ -120,7 +138,7 @@ export async function updateRunningSession(
   id: string,
   patch: { distanceMeters?: number | null; durationSeconds?: number | null; route?: string | null },
 ) {
-  await updateDoc(sessionRef(id), patch)
+  await trackWrite(updateDoc(sessionRef(id), patch))
 }
 
 /**
@@ -143,33 +161,33 @@ export async function duplicateSession(fromId: string, toDate: string): Promise<
   }))
   // Look for an empty strength session on toDate we can reuse.
   const q = query(sessionsCol(), where('date', '==', toDate), limit(10))
-  const snap = await getDocs(q)
+  const snap = await readDocs(q)
   for (const doc of snap.docs) {
     const s = parseSession(doc.id, doc.data())
     if (s.type === 'strength' && s.exercises.length === 0) {
-      await updateDoc(sessionRef(s.id), { exercises: templateExercises })
+      await trackWrite(updateDoc(sessionRef(s.id), { exercises: templateExercises }))
       return { ...s, exercises: templateExercises }
     }
   }
   // Otherwise create a brand-new session (does NOT touch any existing session).
   const created = await createSession(toDate, source.notes, 'strength')
-  await updateDoc(sessionRef(created.id), { exercises: templateExercises })
+  await trackWrite(updateDoc(sessionRef(created.id), { exercises: templateExercises }))
   return { ...created, exercises: templateExercises }
 }
 
 export async function updateSession(id: string, patch: Partial<Pick<Session, 'date' | 'notes' | 'type'>>) {
-  await updateDoc(sessionRef(id), patch)
+  await trackWrite(updateDoc(sessionRef(id), patch))
 }
 
 export async function deleteSession(id: string) {
-  await deleteDoc(sessionRef(id))
+  await trackWrite(deleteDoc(sessionRef(id)))
 }
 
 async function mutateExercises(sessionId: string, fn: (exercises: Exercise[]) => Exercise[]): Promise<Exercise[]> {
-  const snap = await getDoc(sessionRef(sessionId))
+  const snap = await readDoc(sessionRef(sessionId))
   const current = (snap.data()?.exercises as Exercise[]) ?? []
   const next = fn(current)
-  await updateDoc(sessionRef(sessionId), { exercises: next })
+  await trackWrite(updateDoc(sessionRef(sessionId), { exercises: next }))
   return next
 }
 
@@ -294,7 +312,7 @@ export async function deleteSetDrop(
 
 export async function listWeighIns(max = 180): Promise<WeighIn[]> {
   const q = query(weighInsCol(), orderBy('createdAt', 'desc'), limit(max))
-  const snap = await getDocs(q)
+  const snap = await readDocs(q)
   return snap.docs
     .map(d => parseWeighIn(d.id, d.data()))
     .sort((a, b) => b.date.localeCompare(a.date))
@@ -308,24 +326,24 @@ export async function setWeighIn(
   note: string | null = null,
 ): Promise<WeighIn> {
   const id = `${date}-${slot}`
-  await setDoc(weighInRef(id), {
+  await trackWrite(setDoc(weighInRef(id), {
     date,
     slot,
     weight,
     note,
     createdAt: serverTimestamp(),
-  })
+  }))
   return { id, date, slot, weight, note, createdAt: Date.now() }
 }
 
 export async function getWeighIn(date: string, slot: WeighSlot): Promise<WeighIn | null> {
-  const snap = await getDoc(weighInRef(`${date}-${slot}`))
+  const snap = await readDoc(weighInRef(`${date}-${slot}`))
   if (!snap.exists()) return null
   return parseWeighIn(snap.id, snap.data())
 }
 
 export async function deleteWeighIn(id: string) {
-  await deleteDoc(weighInRef(id))
+  await trackWrite(deleteDoc(weighInRef(id)))
 }
 
 export async function getDistinctExerciseNames(): Promise<string[]> {
@@ -365,7 +383,7 @@ export async function renameExerciseEverywhere(
       return ex
     })
     if (changed) {
-      await updateDoc(sessionRef(session.id), { exercises: nextEx })
+      await trackWrite(updateDoc(sessionRef(session.id), { exercises: nextEx }))
       touched++
     }
   }
@@ -408,7 +426,7 @@ export async function setExerciseBodyweightEverywhere(
       return { ...ex, bodyweight, sets: nextSets }
     })
     if (changed) {
-      await updateDoc(sessionRef(session.id), { exercises: nextEx })
+      await trackWrite(updateDoc(sessionRef(session.id), { exercises: nextEx }))
       touched++
     }
   }
@@ -491,4 +509,16 @@ export async function getExerciseAggregates(
   }
   out.sort((a, b) => b.totalSets - a.totalSets)
   return out
+}
+
+/** Put a set back at a given position (used to undo a swipe-delete). */
+export async function insertSet(sessionId: string, exerciseId: string, set: ExerciseSet, index: number) {
+  await mutateExercises(sessionId, prev =>
+    prev.map(e => {
+      if (e.id !== exerciseId) return e
+      const sets = [...e.sets]
+      sets.splice(Math.min(index, sets.length), 0, set)
+      return { ...e, sets }
+    }),
+  )
 }
