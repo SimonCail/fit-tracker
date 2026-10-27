@@ -44,6 +44,8 @@ export function Layout() {
   return (
     <LayoutCtx.Provider value={actions}>
       <div className="min-h-[100dvh] flex flex-col">
+        {/* Solid band behind the iPhone status bar: content no longer slides under the clock, and iOS stops drawing its blur there. */}
+        <div aria-hidden className="sm:hidden fixed top-0 inset-x-0 z-40 h-[env(safe-area-inset-top)] bg-bg pointer-events-none" />
         <DesktopBar pathname={loc.pathname} />
 
         <main
@@ -120,7 +122,7 @@ function MobileTabBar({ pathname, onNew }: { pathname: string; onNew: () => void
   return (
     <nav
       aria-label="Navigation principale"
-      className="sm:hidden fixed bottom-0 inset-x-0 z-30 bar hairline-t pb-safe"
+      className="sm:hidden fixed bottom-0 inset-x-0 z-30 bar bar-extend hairline-t pb-tabbar"
     >
       <div className="grid grid-cols-5 items-stretch h-[62px] max-w-xl mx-auto">
         {left.map(t => <TabLink key={t.to} tab={t} pathname={pathname} />)}
