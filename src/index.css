@@ -7,13 +7,15 @@
 /*
  * Fit — design tokens
  *
- * The interface itself is black and chalk. Colour only ever means data, and each
- * colour is a competition weight plate:
+ * Data colours are competition weight plates:
  *   lift  (20 kg blue)    strength sessions
  *   pr    (25 kg red)     personal records — and destructive actions
  *   weigh (15 kg yellow)  body-weight entries
  *   run   (10 kg green)   running sessions
- * Actions are ink-on-paper buttons, never coloured.
+ * `accent` is the theme's own colour: primary buttons and highlights. On Nuit and Craie
+ * it equals ink (black and chalk); the other themes give it a colour chosen so it can't be
+ * mistaken for a data colour (no red, blue, green or yellow accents).
+ * `faint` is the quietest text; every theme keeps it at 4.5:1 contrast or more.
  */
 @theme {
   --font-sans: "Schibsted Grotesk Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -26,7 +28,10 @@
   --color-line-strong: #434343;
   --color-ink: #F3F2EE;
   --color-dim: #9D9B95;
-  --color-faint: #66645F;
+  --color-faint: #898883;
+
+  --color-accent: #F3F2EE;
+  --color-on-accent: #000000;
 
   --color-lift: #3F70E0;
   --color-on-lift: #FFFFFF;
@@ -49,7 +54,10 @@ html:not(.dark) {
   --color-line-strong: #BDBDB6;
   --color-ink: #131312;
   --color-dim: #5F5E59;
-  --color-faint: #8E8D87;
+  --color-faint: #696864;
+
+  --color-accent: #131312;
+  --color-on-accent: #F2F2EF;
 
   --color-lift: #2453C7;
   --color-on-lift: #FFFFFF;
@@ -57,6 +65,78 @@ html:not(.dark) {
   --color-weigh: #9A6400;
   --color-run: #167A43;
   --color-danger: #C92F21;
+}
+
+/* ── Colour themes (picked in Réglages). Data colours stay those of the dark/light base. ── */
+
+/* Ardoise: blue-grey night, lavender accent */
+html[data-theme="slate"] {
+  --color-bg: #0D1117;
+  --color-surface: #161B23;
+  --color-surface-2: #212833;
+  --color-line: #2A3240;
+  --color-line-strong: #3E4858;
+  --color-ink: #E9EEF5;
+  --color-dim: #96A1B2;
+  --color-faint: #868F9D;
+  --color-accent: #C4B5FD;
+  --color-on-accent: #0D1117;
+}
+
+/* Forêt: deep green, lime accent */
+html[data-theme="forest"] {
+  --color-bg: #0A110D;
+  --color-surface: #121C16;
+  --color-surface-2: #1C2921;
+  --color-line: #24332A;
+  --color-line-strong: #37493D;
+  --color-ink: #ECF2EC;
+  --color-dim: #9AAA9E;
+  --color-faint: #839088;
+  --color-accent: #C5E86C;
+  --color-on-accent: #06130B;
+}
+
+/* Prune: aubergine, orchid accent */
+html[data-theme="plum"] {
+  --color-bg: #110B13;
+  --color-surface: #1B131E;
+  --color-surface-2: #271C2B;
+  --color-line: #302334;
+  --color-line-strong: #47354C;
+  --color-ink: #F3EAF4;
+  --color-dim: #A898AB;
+  --color-faint: #918394;
+  --color-accent: #E58BD0;
+  --color-on-accent: #1A0B17;
+}
+
+/* Sable: warm paper, chocolate accent */
+html[data-theme="sand"] {
+  --color-bg: #F1EADF;
+  --color-surface: #FBF7F0;
+  --color-surface-2: #E6DDCF;
+  --color-line: #DCD1C0;
+  --color-line-strong: #BFB29E;
+  --color-ink: #2A2118;
+  --color-dim: #6B5E4E;
+  --color-faint: #6B6052;
+  --color-accent: #6B4A2B;
+  --color-on-accent: #FFFFFF;
+}
+
+/* Rose: blush, plum accent */
+html[data-theme="rose"] {
+  --color-bg: #F6E9E8;
+  --color-surface: #FFF8F7;
+  --color-surface-2: #EEDCDB;
+  --color-line: #E3CFCD;
+  --color-line-strong: #C9AFAC;
+  --color-ink: #2A1416;
+  --color-dim: #725457;
+  --color-faint: #775C5F;
+  --color-accent: #7C3A8F;
+  --color-on-accent: #FFFFFF;
 }
 
 html, body, #root {

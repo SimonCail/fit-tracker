@@ -1,9 +1,102 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+    // True when `owner` has the current user in their friends list.
+    function isFriendOf(owner) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(owner)/friends/$(request.auth.uid));
+    }
+    function validName(n) {
+      return n is string && n.size() > 0 && n.size() <= 40;
+    }
+    // Optional profile photo: a small JPEG data URL (resized to 256 px by the app), or null.
+    function validPhoto(d) {
+      return !('photo' in d) || d.photo == null
+        || (d.photo is string && d.photo.size() < 150000
+            && d.photo.matches('^data:image/jpeg;base64,[A-Za-z0-9+/=]+$'));
+    }
+
     // Each user can only access documents under their own /users/{uid}/ tree.
     match /users/{uid}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Friends can read your shared sessions — not hidden ones, nor your weigh-ins,
+    // exercise notes or settings.
+    match /users/{uid}/sessions/{sessionId} {
+      allow read: if isFriendOf(uid) && resource.data.shared == true;
+
+      // Reactions: one per friend (doc id = their uid). Friends can read them all and set or
+      // remove their own; the owner can read and delete any (owner rule above).
+      match /reactions/{reactorUid} {
+        allow read: if isFriendOf(uid);
+        allow create, update: if isFriendOf(uid) && request.auth.uid == reactorUid
+          && get(/databases/$(database)/documents/users/$(uid)/sessions/$(sessionId)).data.shared == true
+          && request.resource.data.keys().hasOnly(['emoji', 'name', 'at'])
+          // Any emoji: just a short, non-empty string (the app keeps a single emoji).
+          && request.resource.data.emoji is string
+          && request.resource.data.emoji.size() > 0 && request.resource.data.emoji.size() <= 32
+          && request.resource.data.name is string && request.resource.data.name.size() <= 40;
+        allow delete: if signedIn() && request.auth.uid == reactorUid;
+      }
+    }
+
+    match /users/{uid}/friends/{friendUid} {
+      // Accepting a request: the recipient adds themselves to the sender's list,
+      // only if the sender really asked (friendRequests/{sender}_{recipient}).
+      allow create: if signedIn() && request.auth.uid == friendUid
+        && exists(/databases/$(database)/documents/friendRequests/$(uid + '_' + friendUid))
+        && request.resource.data.keys().hasOnly(['name', 'since']);
+      // Either side can end the friendship.
+      allow delete: if signedIn() && request.auth.uid == friendUid;
+    }
+
+    // Public profile: display name, friend code and optional photo.
+    match /profiles/{uid} {
+      allow get: if signedIn();
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name', 'code', 'photo', 'updatedAt'])
+        && validName(request.resource.data.name)
+        && validPhoto(request.resource.data)
+        && getAfter(/databases/$(database)/documents/friendCodes/$(request.resource.data.code)).data.uid == uid;
+      allow update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name', 'code', 'photo', 'updatedAt'])
+        && request.resource.data.code == resource.data.code
+        && validName(request.resource.data.name)
+        && validPhoto(request.resource.data);
+      // Account deletion.
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Friend code → uid. Claimed once, never changed; released only when the account is deleted.
+    match /friendCodes/{code} {
+      allow get: if signedIn();
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+      allow create: if signedIn()
+        && code.matches('^[A-Z0-9]{6}$')
+        && request.resource.data.keys().hasOnly(['uid'])
+        && request.resource.data.uid == request.auth.uid;
+    }
+
+    // Pending requests. Document id = {fromUid}_{toUid}.
+    match /friendRequests/{requestId} {
+      // Single-document reads are allowed on ids that involve you, even if the doc doesn't exist.
+      allow get: if signedIn()
+        && (requestId.matches('^' + request.auth.uid + '_.+$') || requestId.matches('^.+_' + request.auth.uid + '$'));
+      allow list: if signedIn()
+        && (resource.data.from == request.auth.uid || resource.data.to == request.auth.uid);
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['from', 'to', 'fromName', 'toName', 'createdAt'])
+        && request.resource.data.from == request.auth.uid
+        && request.resource.data.to != request.auth.uid
+        && requestId == request.auth.uid + '_' + request.resource.data.to
+        && exists(/databases/$(database)/documents/profiles/$(request.resource.data.to));
+      // The sender can cancel, the recipient can decline (or delete it while accepting).
+      allow delete: if signedIn()
+        && (resource.data.from == request.auth.uid || resource.data.to == request.auth.uid);
     }
   }
 }

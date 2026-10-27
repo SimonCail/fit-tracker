@@ -129,7 +129,7 @@ export function History() {
         {dayFilter && (
           <button
             onClick={() => setParams({})}
-            className="h-9 shrink-0 rounded-full bg-ink text-bg pl-3.5 pr-2.5 text-[14px] font-semibold flex items-center gap-1.5 cursor-pointer"
+            className="h-10 shrink-0 rounded-full bg-ink text-bg pl-4 pr-3 text-[14px] font-semibold flex items-center gap-1.5 cursor-pointer"
             aria-label="Retirer le filtre de date"
           >
             <span className="first-letter:uppercase">{format(parseISO(dayFilter), 'EEEE d MMM', { locale: fr })}</span>
@@ -142,7 +142,7 @@ export function History() {
             onClick={() => setFilter(f.value)}
             aria-pressed={filter === f.value}
             className={cn(
-              'h-9 shrink-0 rounded-full px-4 text-[14px] font-semibold cursor-pointer transition-colors',
+              'h-10 shrink-0 rounded-full px-4 text-[14px] font-semibold cursor-pointer transition-colors',
               filter === f.value ? 'bg-surface text-ink shadow-[inset_0_0_0_1.5px_var(--color-ink)]' : 'bg-surface text-dim',
             )}
           >
@@ -254,7 +254,7 @@ function SessionItem({ session, unit, userBwKg, onClick }: { session: Session; u
 function WeighItem({ weighIn, unit, onDelete }: { weighIn: WeighIn; unit: 'kg' | 'lb'; onDelete: () => void }) {
   const label = weighIn.slot === 'evening' ? 'Pesée du soir' : weighIn.slot === 'morning' ? 'Pesée du matin' : 'Pesée'
   return (
-    <div className="flex items-center gap-3.5 pl-4 pr-2 py-2.5 hairline-b last:shadow-none">
+    <div className="flex items-center gap-3.5 pl-4 pr-1.5 py-2 hairline-b last:shadow-none">
       <span className="w-[22px] grid place-items-center text-weigh">
         {weighIn.slot === 'evening' ? <Moon size={18} /> : <Sunrise size={18} />}
       </span>
@@ -266,7 +266,7 @@ function WeighItem({ weighIn, unit, onDelete }: { weighIn: WeighIn; unit: 'kg' |
         <span className="num text-[22px]">{frNum(fromKg(weighIn.weight, unit), 1)}</span>
         <span className="text-[12px] font-semibold text-dim">{unit}</span>
       </span>
-      <button onClick={onDelete} className="h-10 w-10 grid place-items-center rounded-full text-faint hover:text-danger cursor-pointer" aria-label="Supprimer cette pesée">
+      <button onClick={onDelete} className="h-11 w-11 grid place-items-center rounded-full text-faint hover:text-danger cursor-pointer" aria-label="Supprimer cette pesée">
         <X size={17} />
       </button>
     </div>

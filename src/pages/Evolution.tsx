@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, Dumbbell, Flame, Minus, Plus } from 'lucide-react'
 import { format, parseISO, startOfWeek, subDays } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, ResponsiveContainer, Tooltip, XAxis, YAxis, ComposedChart } from 'recharts'
@@ -14,6 +14,7 @@ import { weeklyAverage, weightTrend } from '../lib/weightTrend'
 import { frNum, fromKg, round } from '../lib/units'
 import { setTotalReps, setVolumeKg } from '../lib/setMath'
 import { useSettings } from '../store/settings'
+import { weeklyStreak } from '../lib/streak'
 
 const RANGES = [
   { key: '30d', label: '30 j', days: 30 },
@@ -32,6 +33,8 @@ const tooltipStyle = {
   color: 'var(--color-ink)',
   boxShadow: '0 10px 30px -10px rgba(0,0,0,0.5)',
 } as const
+/** Size used before the container is measured — avoids Recharts' "width(-1)" warning. */
+const INITIAL_SIZE = { width: 320, height: 200 }
 
 export function Evolution() {
   const { unit } = useSettings()
@@ -40,6 +43,16 @@ export function Evolution() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [range, setRange] = useState<RangeKey>('90d')
+  const [tab, setTab] = useState<ProgressTab>(() => {
+    try {
+      const t = localStorage.getItem(TAB_KEY)
+      return t === 'run' || t === 'weight' ? t : 'lift'
+    } catch { return 'lift' }
+  })
+  function pickTab(t: ProgressTab) {
+    setTab(t)
+    try { localStorage.setItem(TAB_KEY, t) } catch { /* ignore */ }
+  }
 
   useEffect(() => {
     (async () => {
@@ -58,42 +71,194 @@ export function Evolution() {
   const rangeDays = RANGES.find(r => r.key === range)!.days
   const cutoff = format(subDays(new Date(), rangeDays), 'yyyy-MM-dd')
 
+  const hasRuns = sessions.some(
+    s => s.type === 'running' && s.date >= cutoff && ((s.distanceMeters ?? 0) > 0 || (s.durationSeconds ?? 0) > 0),
+  )
+
   return (
     <>
       <PageHeader title="Progrès" />
-      <Segmented
-        value={range}
-        onChange={setRange}
-        options={RANGES.map(r => ({ value: r.key, label: r.label }))}
-        size="sm"
-        className="mb-4 lg:max-w-sm"
-      />
-      <Link
-        to="/records"
-        className="mb-8 flex items-center gap-3 rounded-[var(--radius-card)] bg-surface px-4 h-14 active:bg-surface-2 hover:bg-surface-2/60 lg:max-w-sm"
-      >
-        <Disc plate="pr" size={20} />
-        <span className="flex-1 font-semibold">Records</span>
-        <span className="text-[14px] text-dim">Le palmarès</span>
-        <ChevronRight size={18} className="text-faint" />
-      </Link>
+
+      <div className="grid grid-cols-2 gap-2 mb-8 lg:max-w-xl">
+        <QuickLink to="/records" icon={<Disc plate="pr" size={20} />} label="Records" hint="Le palmarès" />
+        <QuickLink to="/exercises" icon={<Dumbbell size={20} className="text-dim" />} label="Exercices" hint="Historique" />
+      </div>
 
       {loading ? (
         <div className="space-y-8">
+          <Skeleton className="h-64 rounded-[var(--radius-card)]" />
           <Skeleton className="h-80 rounded-[var(--radius-card)]" />
-          <Skeleton className="h-56 rounded-[var(--radius-card)]" />
         </div>
       ) : error ? (
         <ErrorNote message={error} />
       ) : (
-        <div className="grid gap-10 lg:grid-cols-2 lg:gap-x-8 items-start">
-          <WeightSection weighIns={weighIns} cutoff={cutoff} unit={unit} />
-          <MuscleSection sessions={sessions} />
-          <VolumeSection sessions={sessions} weighIns={weighIns} cutoff={cutoff} unit={unit} />
-          <RunningSection sessions={sessions} cutoff={cutoff} />
-        </div>
+        <>
+          <RegularitySection sessions={sessions} />
+
+          {/* One topic at a time instead of a long scroll of every chart. */}
+          <div className="mt-10 flex flex-col sm:flex-row sm:items-center gap-3 sm:justify-between">
+            <Segmented
+              value={tab}
+              onChange={pickTab}
+              options={[{ value: 'lift', label: 'Muscu' }, { value: 'run', label: 'Course' }, { value: 'weight', label: 'Poids' }]}
+              className="sm:w-[320px]"
+            />
+            <Segmented
+              value={range}
+              onChange={setRange}
+              options={RANGES.map(r => ({ value: r.key, label: r.label }))}
+              size="sm"
+              className="sm:w-[280px]"
+            />
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-10 lg:grid-cols-2 lg:gap-x-8 items-start">
+            {tab === 'lift' && (
+              <>
+                <VolumeSection sessions={sessions} weighIns={weighIns} cutoff={cutoff} unit={unit} />
+                <MuscleSection sessions={sessions} />
+              </>
+            )}
+            {tab === 'run' && (hasRuns
+              ? <RunningSection sessions={sessions} cutoff={cutoff} />
+              : (
+                <Card className="px-4 lg:col-span-2">
+                  <EmptyState className="py-8" title="Aucune sortie sur la période" subtitle="Note une course ou choisis une période plus longue." />
+                </Card>
+              ))}
+            {tab === 'weight' && <div className="lg:col-span-2 lg:max-w-3xl"><WeightSection weighIns={weighIns} cutoff={cutoff} unit={unit} /></div>}
+          </div>
+        </>
       )}
     </>
+  )
+}
+
+type ProgressTab = 'lift' | 'run' | 'weight'
+const TAB_KEY = 'fit-tracker:progress-tab'
+
+function QuickLink({ to, icon, label, hint }: { to: string; icon: React.ReactNode; label: string; hint: string }) {
+  return (
+    <Link
+      to={to}
+      className="flex items-center gap-3 rounded-[var(--radius-card)] bg-surface px-4 h-16 active:bg-surface-2 hover:bg-surface-2/60 min-w-0"
+    >
+      {icon}
+      <span className="flex-1 min-w-0">
+        <span className="block font-semibold truncate">{label}</span>
+        <span className="block text-[13px] text-dim truncate">{hint}</span>
+      </span>
+      <ChevronRight size={18} className="text-faint shrink-0" />
+    </Link>
+  )
+}
+
+/* ── Regularity ──────────────────────────────────────────────────────── */
+
+function RegularitySection({ sessions }: { sessions: Session[] }) {
+  const goal = useSettings(s => s.weeklyGoal ?? 2)
+  const setGoal = useSettings(s => s.setWeeklyGoal)
+  const st = useMemo(() => weeklyStreak(sessions, goal), [sessions, goal])
+  const done = st.thisWeek
+  const left = Math.max(0, goal - done)
+  const scale = Math.max(goal, ...st.recent.map(w => w.count), 1)
+
+  return (
+    <section>
+      <SectionTitle>Régularité</SectionTitle>
+      <Card className="p-4 sm:p-5">
+        <div className="grid gap-5 sm:grid-cols-2 sm:gap-8">
+          {/* Streak */}
+          <div className="flex items-center gap-3.5">
+            <span className={cn('h-14 w-14 rounded-full grid place-items-center shrink-0', st.current > 0 ? 'bg-pr/15 text-pr' : 'bg-surface-2 text-faint')}>
+              <Flame size={28} />
+            </span>
+            <div className="min-w-0">
+              <p className="text-[13px] text-dim">Ta série</p>
+              <p className="flex items-baseline gap-1.5">
+                <span className="num text-[40px] leading-none">{st.current}</span>
+                <span className="text-[16px] font-semibold">semaine{st.current > 1 ? 's' : ''} de suite</span>
+              </p>
+              <p className="text-[13px] text-dim mt-1">
+                à {goal} séance{goal > 1 ? 's' : ''} ou plus{st.best > st.current ? `, record ${st.best} semaines` : ''}
+              </p>
+            </div>
+          </div>
+
+          {/* This week */}
+          <div>
+            <p className="text-[13px] text-dim">Cette semaine</p>
+            <p className="flex items-baseline gap-1.5">
+              <span className="num text-[40px] leading-none">{done}</span>
+              <span className="text-[16px] font-semibold text-dim">/ {goal} séance{goal > 1 ? 's' : ''}</span>
+            </p>
+            <div className="flex gap-1.5 mt-2" aria-hidden>
+              {Array.from({ length: Math.max(goal, done) }).map((_, i) => (
+                <span key={i} className={cn('h-2 flex-1 max-w-12 rounded-full', i < done ? 'bg-accent' : 'bg-surface-2')} />
+              ))}
+            </div>
+            <p className="text-[13px] mt-2">
+              {left === 0
+                ? <span className="font-semibold">Objectif atteint, la série continue 🎉</span>
+                : <span className="text-dim">Encore {left} pour {st.current > 0 ? 'garder ta série' : 'démarrer une série'}.</span>}
+            </p>
+          </div>
+        </div>
+
+        {/* Last 12 weeks as bars, with the goal as a dashed line. */}
+        <div className="mt-6">
+          <p className="text-[13px] text-dim mb-2">Séances par semaine, sur 12 semaines (la dernière barre = cette semaine)</p>
+          <div className="relative h-28 flex items-end gap-1.5 sm:gap-2.5">
+            <div
+              className="absolute inset-x-0 z-10 border-t-[1.5px] border-dashed border-ink/50 pointer-events-none"
+              style={{ bottom: `calc(${(goal / scale) * 82}% + 14px)` }}
+              aria-hidden
+            />
+            {st.recent.map((w, i) => {
+              const last = i === st.recent.length - 1
+              return (
+                <div key={w.week} className="flex-1 h-full flex flex-col justify-end items-center gap-1 min-w-0">
+                  <span className={cn('num text-[13px]', w.count ? 'text-ink' : 'text-faint')}>{w.count || ''}</span>
+                  <span
+                    title={`Semaine du ${format(parseISO(w.week), 'd MMMM', { locale: fr })} : ${w.count} séance${w.count > 1 ? 's' : ''}`}
+                    className={cn(
+                      'w-full max-w-9 rounded-t-[6px] rounded-b-[2px]',
+                      w.met ? 'bg-accent' : w.count > 0 ? 'bg-line-strong' : 'bg-surface-2',
+                      last && !w.met && 'bg-line-strong/60',
+                    )}
+                    style={{ height: `calc(${(Math.max(w.count, 0.15) / scale) * 82}%)` }}
+                  />
+                  <span className={cn('text-[10px] leading-none whitespace-nowrap', last ? 'font-bold text-ink' : 'text-faint')}>
+                    {last || i % 3 === 2 ? format(parseISO(w.week), 'd/MM') : '\u00a0'}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+          <p className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-dim mt-3">
+            <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] bg-accent" /> Objectif atteint</span>
+            <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] bg-line-strong" /> En dessous</span>
+            <span className="flex items-center gap-1.5"><span className="w-4 border-t-[1.5px] border-dashed border-ink/50" /> Objectif ({goal} séance{goal > 1 ? 's' : ''})</span>
+          </p>
+        </div>
+
+        <div className="mt-5 pt-4 hairline-t flex items-center justify-between gap-3">
+          <span className="text-[14px] font-medium">Objectif par semaine</span>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center rounded-full bg-surface-2">
+              <button type="button" onClick={() => setGoal(goal - 1)} disabled={goal <= 1} aria-label="Baisser l’objectif" className="h-9 w-9 grid place-items-center cursor-pointer disabled:opacity-30">
+                <Minus size={16} />
+              </button>
+              <span className="num text-[20px] w-6 text-center" aria-live="polite">{goal}</span>
+              <button type="button" onClick={() => setGoal(goal + 1)} disabled={goal >= 7} aria-label="Monter l’objectif" className="h-9 w-9 grid place-items-center cursor-pointer disabled:opacity-30">
+                <Plus size={16} />
+              </button>
+            </div>
+            <span className="text-[13px] text-dim">séance{goal > 1 ? 's' : ''}</span>
+          </div>
+        </div>
+      </Card>
+    </section>
   )
 }
 
@@ -149,7 +314,7 @@ function WeightSection({ weighIns, cutoff, unit }: { weighIns: WeighIn[]; cutoff
             </dl>
           </div>
           <div className="h-56 sm:h-64 mt-4 -ml-2 -mr-1">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" initialDimension={INITIAL_SIZE}>
               <ComposedChart data={series} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="weighFill" x1="0" y1="0" x2="0" y2="1">
@@ -309,7 +474,7 @@ function VolumeSection({ sessions, weighIns, cutoff, unit }: { sessions: Session
           Meilleure semaine : <span className="text-ink font-semibold">{frNum(best.value, 1)} {big}</span>, celle du {format(parseISO(best.week), 'd MMMM', { locale: fr })}
         </p>
         <div className="h-48 mt-4 -ml-2 -mr-1">
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height="100%" initialDimension={INITIAL_SIZE}>
             <BarChart data={weeks} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
               <CartesianGrid stroke="var(--color-line)" vertical={false} />
               <XAxis dataKey="week" tickFormatter={d => format(parseISO(d), 'd/MM')} minTickGap={16} tickMargin={8} {...axis} />
@@ -334,6 +499,15 @@ function VolumeSection({ sessions, weighIns, cutoff, unit }: { sessions: Session
 
 /* ── Running ─────────────────────────────────────────────────────────── */
 
+/** Pace only compares fairly between runs of a similar length. */
+const RUN_BANDS = [
+  { key: 'short', label: '< 6 km', title: 'moins de 6 km', min: 0, max: 6 },
+  { key: 'mid', label: '6–12 km', title: '6 à 12 km', min: 6, max: 12 },
+  { key: 'long', label: '> 12 km', title: 'plus de 12 km', min: 12, max: Infinity },
+] as const
+type RunBand = (typeof RUN_BANDS)[number]['key']
+const bandOf = (km: number): RunBand => RUN_BANDS.find(b => km >= b.min && km < b.max)!.key
+
 function RunningSection({ sessions, cutoff }: { sessions: Session[]; cutoff: string }) {
   const runs = useMemo(
     () => sessions
@@ -343,34 +517,48 @@ function RunningSection({ sessions, cutoff }: { sessions: Session[]; cutoff: str
     [sessions, cutoff],
   )
 
+  // Each record keeps the run it comes from, so the card can say which outing it was.
   const stats = useMemo(() => {
-    let bestPace: number | null = null
-    let longestKm = 0
-    let longestSec = 0
+    let fastest: { pace: number; run: Session } | null = null
+    let longest: Session | null = null
+    let farthest: Session | null = null
     let totalKm = 0
     for (const r of runs) {
       const km = (r.distanceMeters ?? 0) / 1000
       const sec = r.durationSeconds ?? 0
       totalKm += km
-      longestKm = Math.max(longestKm, km)
-      longestSec = Math.max(longestSec, sec)
+      if (km > 0 && (!farthest || km > (farthest.distanceMeters ?? 0) / 1000)) farthest = r
+      if (sec > 0 && (!longest || sec > (longest.durationSeconds ?? 0))) longest = r
       if (km > 0 && sec > 0) {
         const p = sec / km
-        if (bestPace === null || p < bestPace) bestPace = p
+        if (!fastest || p < fastest.pace) fastest = { pace: p, run: r }
       }
     }
-    return { bestPace, longestKm, longestSec, totalKm }
+    return { fastest, longest, farthest, totalKm }
   }, [runs])
 
-  const chartData = useMemo(
+  const paced = useMemo(
     () => runs
       .filter(r => (r.distanceMeters ?? 0) > 0 && (r.durationSeconds ?? 0) > 0)
       .map(r => {
         const km = (r.distanceMeters ?? 0) / 1000
-        return { date: r.date, pace: Math.round(((r.durationSeconds ?? 0) / km / 60) * 100) / 100, km: Math.round(km * 100) / 100 }
+        return { date: r.date, pace: Math.round(((r.durationSeconds ?? 0) / km / 60) * 100) / 100, km: Math.round(km * 100) / 100, band: bandOf(km) }
       }),
     [runs],
   )
+  const bandCounts = useMemo(() => {
+    const c: Record<RunBand, number> = { short: 0, mid: 0, long: 0 }
+    for (const p of paced) c[p.band]++
+    return c
+  }, [paced])
+  const bands = RUN_BANDS.filter(b => bandCounts[b.key] > 0)
+  // Default to the distance you run most often.
+  const [pickedBand, setBand] = useState<RunBand | null>(null)
+  const band: RunBand = pickedBand && bandCounts[pickedBand] > 0
+    ? pickedBand
+    : (bands.reduce<(typeof RUN_BANDS)[number] | null>((m, b) => (!m || bandCounts[b.key] > bandCounts[m.key] ? b : m), null)?.key ?? 'short')
+  const chartData = useMemo(() => paced.filter(p => p.band === band), [paced, band])
+  const bandInfo = RUN_BANDS.find(b => b.key === band)!
 
   const paceAxis = useMemo(() => {
     if (chartData.length === 0) return { domain: [5, 6] as [number, number], ticks: [5, 6] }
@@ -412,17 +600,41 @@ function RunningSection({ sessions, cutoff }: { sessions: Session[]; cutoff: str
         Course
       </SectionTitle>
 
-      <Card className="grid grid-cols-3 py-4 mb-3">
-        <RunStat label="Meilleure allure" value={stats.bestPace !== null ? paceStr(stats.bestPace) : '–'} unit="/km" />
-        <RunStat label="Plus longue" value={formatDuration(stats.longestSec)} />
-        <RunStat label="Plus loin" value={frNum(stats.longestKm, 1)} unit="km" />
+      <Card className="overflow-hidden mb-3">
+        <p className="px-4 pt-3.5 pb-2 text-[13px] text-dim">Tes records sur la période, chacun sur sa propre sortie</p>
+        {stats.fastest && (
+          <RunRecord label="Meilleure allure" run={stats.fastest.run} value={paceStr(stats.fastest.pace)} unit="/km" />
+        )}
+        {stats.longest && (
+          <RunRecord label="Sortie la plus longue" run={stats.longest} value={formatDuration(stats.longest.durationSeconds ?? 0)} />
+        )}
+        {stats.farthest && (
+          <RunRecord label="Plus grande distance" run={stats.farthest} value={frNum((stats.farthest.distanceMeters ?? 0) / 1000, 1)} unit="km" />
+        )}
       </Card>
 
-      {chartData.length >= 2 && (
+      {paced.length >= 2 && (
         <Card className="p-4 sm:p-5 mb-3">
-          <p className="text-[14px] text-dim">Allure par sortie, plus haut = plus rapide</p>
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+            <p className="text-[14px] text-dim">Allure, à distance comparable</p>
+            {bands.length > 1 && (
+              <Segmented
+                size="sm"
+                className={bands.length === 3 ? 'w-full sm:w-[260px]' : 'w-full sm:w-[180px]'}
+                value={band}
+                onChange={setBand}
+                options={bands.map(b => ({ value: b.key, label: b.label }))}
+              />
+            )}
+          </div>
+          {chartData.length < 2 ? (
+            <p className="text-[14px] text-dim mt-4">
+              Une seule sortie de {bandInfo.title} pour l’instant : il en faut deux pour voir une évolution.
+            </p>
+          ) : (
+          <>
           <div className="h-44 sm:h-52 mt-4 -ml-2 -mr-1">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" initialDimension={INITIAL_SIZE}>
               <AreaChart data={chartData} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="runFill" x1="0" y1="0" x2="0" y2="1">
@@ -446,6 +658,11 @@ function RunningSection({ sessions, cutoff }: { sessions: Session[]; cutoff: str
               </AreaChart>
             </ResponsiveContainer>
           </div>
+          <p className="text-[12px] text-faint mt-2">
+            {chartData.length} sorties de {bandInfo.title}. Plus la courbe monte, plus tu cours vite.
+          </p>
+          </>
+          )}
         </Card>
       )}
 
@@ -471,15 +688,32 @@ function RunningSection({ sessions, cutoff }: { sessions: Session[]; cutoff: str
   )
 }
 
-function RunStat({ label, value, unit }: { label: string; value: string; unit?: string }) {
+/** One record line: what it is, which run it comes from (date, distance, time), and the value. */
+function RunRecord({ label, run, value, unit }: { label: string; run: Session; value: string; unit?: string }) {
+  const km = (run.distanceMeters ?? 0) / 1000
+  const sec = run.durationSeconds ?? 0
+  const detail = [
+    km > 0 ? `${frNum(km, 1)} km` : null,
+    sec > 0 ? `en ${formatDuration(sec)}` : null,
+  ].filter(Boolean).join(' ')
   return (
-    <div className="text-center px-1">
-      <p className="flex items-baseline justify-center gap-0.5">
-        <span className="num text-[30px]">{value}</span>
-        {unit && <span className="text-[12px] font-semibold text-dim">{unit}</span>}
-      </p>
-      <p className="text-[12px] text-faint mt-1">{label}</p>
-    </div>
+    <Link
+      to={`/session/${run.id}`}
+      className="flex items-center gap-3 px-4 py-3 hairline-t active:bg-surface-2 hover:bg-surface-2/60"
+    >
+      <Disc plate="run" size={18} />
+      <span className="flex-1 min-w-0">
+        <span className="block font-semibold">{label}</span>
+        <span className="block text-[13px] text-dim truncate">
+          {format(parseISO(run.date), 'd MMMM', { locale: fr })}{detail ? `, ${detail}` : ''}
+        </span>
+      </span>
+      <span className="num text-[26px] shrink-0">
+        {value}
+        {unit && <span className="text-[12px] font-semibold text-dim ml-0.5">{unit}</span>}
+      </span>
+      <ChevronRight size={16} className="text-faint shrink-0" />
+    </Link>
   )
 }
 

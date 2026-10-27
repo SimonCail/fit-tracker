@@ -14,6 +14,7 @@ import {
   Timestamp,
   updateDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore'
 import { auth, db } from './firebase'
 import type { Exercise, ExerciseSet, Session, SessionType, SetDrop, WeighIn, WeighSlot } from './types'
@@ -58,7 +59,7 @@ function toMs(v: unknown): number {
   return Date.now()
 }
 
-function parseSession(id: string, data: Record<string, unknown>): Session {
+export function parseSession(id: string, data: Record<string, unknown>): Session {
   const rawType = data.type as string | undefined
   const type = rawType === 'running' ? 'running' : 'strength'
   return {
@@ -68,6 +69,7 @@ function parseSession(id: string, data: Record<string, unknown>): Session {
     createdAt: toMs(data.createdAt),
     type,
     exercises: Array.isArray(data.exercises) ? (data.exercises as Exercise[]) : [],
+    shared: data.shared !== false,
     distanceMeters: typeof data.distanceMeters === 'number' ? data.distanceMeters : null,
     durationSeconds: typeof data.durationSeconds === 'number' ? data.durationSeconds : null,
     route: (data.route as string | null) ?? null,
@@ -114,9 +116,27 @@ export async function createSession(
     notes,
     type,
     exercises: [],
+    shared: true,
     createdAt: serverTimestamp(),
   }))
-  return { id: docRef.id, date, notes, type, exercises: [], createdAt: Date.now() }
+  return { id: docRef.id, date, notes, type, exercises: [], shared: true, createdAt: Date.now() }
+}
+
+/**
+ * Sessions written before the friends feature have no `shared` field. Friends can only
+ * list sessions where `shared == true`, so stamp the old ones once (per device).
+ */
+const SHARED_BACKFILL_KEY = 'fit-tracker:shared-backfill-v1'
+export async function backfillSharedFlag() {
+  try { if (localStorage.getItem(SHARED_BACKFILL_KEY)) return } catch { /* ignore */ }
+  const snap = await getDocs(query(sessionsCol(), limit(2000)))
+  const missing = snap.docs.filter(d => !('shared' in d.data()))
+  for (let i = 0; i < missing.length; i += 400) {
+    const batch = writeBatch(db)
+    for (const d of missing.slice(i, i + 400)) batch.update(d.ref, { shared: true })
+    await batch.commit()
+  }
+  try { localStorage.setItem(SHARED_BACKFILL_KEY, '1') } catch { /* ignore */ }
 }
 
 /**
@@ -175,7 +195,7 @@ export async function duplicateSession(fromId: string, toDate: string): Promise<
   return { ...created, exercises: templateExercises }
 }
 
-export async function updateSession(id: string, patch: Partial<Pick<Session, 'date' | 'notes' | 'type'>>) {
+export async function updateSession(id: string, patch: Partial<Pick<Session, 'date' | 'notes' | 'type' | 'shared'>>) {
   await trackWrite(updateDoc(sessionRef(id), patch))
 }
 

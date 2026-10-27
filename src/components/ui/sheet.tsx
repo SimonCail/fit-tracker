@@ -1,7 +1,8 @@
-import { forwardRef, type ComponentPropsWithoutRef, type ElementRef, type ReactNode } from 'react'
+import { forwardRef, useCallback, useRef, useState, type ComponentPropsWithoutRef, type ElementRef, type ReactNode } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
 import { cn } from '../../lib/cn'
+import { useSwipeDownToClose } from './swipe'
 
 export const Sheet = DialogPrimitive.Root
 export const SheetTrigger = DialogPrimitive.Trigger
@@ -16,39 +17,57 @@ type SheetContentProps = ComponentPropsWithoutRef<typeof DialogPrimitive.Content
 }
 
 export const SheetContent = forwardRef<ElementRef<typeof DialogPrimitive.Content>, SheetContentProps>(
-  ({ className, children, side = 'right', label, ...props }, ref) => (
-    <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/60 data-[state=open]:animate-overlay-in data-[state=closed]:animate-overlay-out" />
-      <DialogPrimitive.Content
-        ref={ref}
-        aria-describedby={undefined}
-        className={cn(
-          'fixed z-50 flex flex-col bg-bg outline-none',
-          side === 'right' &&
-            'top-0 right-0 bottom-0 w-full sm:max-w-md sm:border-l sm:border-line data-[state=open]:animate-sheet-in-right data-[state=closed]:animate-sheet-out-right',
-          side === 'bottom' &&
-            'left-0 right-0 bottom-0 max-h-[90dvh] rounded-t-[20px] bg-surface sm:left-1/2 sm:right-auto sm:-translate-x-1/2 sm:w-full sm:max-w-lg data-[state=open]:animate-sheet-in-up data-[state=closed]:animate-sheet-out-down',
-          className,
-        )}
-        {...props}
-      >
-        {side === 'bottom' && (
-          <div className="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-line-strong" aria-hidden />
-        )}
-        <DialogPrimitive.Close
+  ({ className, children, side = 'right', label, ...props }, ref) => {
+    const [node, setNode] = useState<HTMLDivElement | null>(null)
+    const closeRef = useRef<HTMLButtonElement>(null)
+
+    // Keep our own handle on the DOM node (for the swipe) while still forwarding the ref.
+    const setRefs = useCallback(
+      (el: HTMLDivElement | null) => {
+        setNode(el)
+        if (typeof ref === 'function') ref(el)
+        else if (ref) ref.current = el
+      },
+      [ref],
+    )
+    const close = useCallback(() => closeRef.current?.click(), [])
+    useSwipeDownToClose(side === 'bottom' ? node : null, close)
+
+    return (
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/60 data-[state=open]:animate-overlay-in data-[state=closed]:animate-overlay-out" />
+        <DialogPrimitive.Content
+          ref={setRefs}
+          aria-describedby={undefined}
           className={cn(
-            'absolute right-3 z-10 grid h-10 w-10 place-items-center rounded-full bg-surface-2 text-dim hover:text-ink transition-colors cursor-pointer',
-            side === 'right' ? 'top-[calc(env(safe-area-inset-top,0px)+0.75rem)]' : 'top-4',
+            'fixed z-50 flex flex-col bg-bg outline-none',
+            side === 'right' &&
+              'top-0 right-0 bottom-0 w-full sm:max-w-md sm:border-l sm:border-line data-[state=open]:animate-sheet-in-right data-[state=closed]:animate-sheet-out-right',
+            side === 'bottom' &&
+              'left-0 right-0 bottom-0 max-h-[90dvh] rounded-t-[20px] bg-surface sm:left-1/2 sm:right-auto sm:-translate-x-1/2 sm:w-full sm:max-w-lg data-[state=open]:animate-sheet-in-up data-[state=closed]:animate-sheet-out-down',
+            className,
           )}
+          {...props}
         >
-          <X size={18} />
-          <span className="sr-only">Fermer</span>
-        </DialogPrimitive.Close>
-        {label && <DialogPrimitive.Title className="sr-only">{label}</DialogPrimitive.Title>}
-        {children}
-      </DialogPrimitive.Content>
-    </DialogPrimitive.Portal>
-  ),
+          {side === 'bottom' && (
+            <div className="mx-auto mt-3 h-1 w-10 shrink-0 rounded-full bg-line-strong" aria-hidden />
+          )}
+          <DialogPrimitive.Close
+            ref={closeRef}
+            className={cn(
+              'absolute right-3 z-10 grid h-10 w-10 place-items-center rounded-full bg-surface-2 text-dim hover:text-ink transition-colors cursor-pointer',
+              side === 'right' ? 'top-[calc(env(safe-area-inset-top,0px)+0.75rem)]' : 'top-4',
+            )}
+          >
+            <X size={18} />
+            <span className="sr-only">Fermer</span>
+          </DialogPrimitive.Close>
+          {label && <DialogPrimitive.Title className="sr-only">{label}</DialogPrimitive.Title>}
+          {children}
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    )
+  },
 )
 SheetContent.displayName = 'SheetContent'
 

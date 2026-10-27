@@ -134,7 +134,8 @@ export function ExercisesPage() {
 
   return (
     <>
-      <PageHeader title="Exercices" />
+      {/* Reached from Progrès on phones, hence the back arrow. */}
+      <PageHeader back title="Exercices" />
 
       <div className="relative mb-5 lg:max-w-xl">
         <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-faint pointer-events-none" />
@@ -169,7 +170,7 @@ export function ExercisesPage() {
                       <span className="num text-[22px]">{agg.bodyweight ? '+' : ''}{frNum(fromKg(agg.bestWeightKg, unit), 1)}</span>
                       <span className="text-[12px] font-semibold text-dim">{unit}</span>
                     </span>
-                    <span className="block text-[11px] text-faint">record</span>
+                    <span className="block text-[12px] text-faint">record</span>
                   </span>
                 )}
               </button>
@@ -222,7 +223,7 @@ export function ExercisesPage() {
             <>
               <ModalTitle className="t-title text-[24px]">Fusionner dans…</ModalTitle>
               <p className="text-[14px] text-dim mt-1">Pratique pour regrouper deux orthographes du même exercice.</p>
-              <div className="mt-5 rounded-[12px] bg-surface-2 overflow-hidden max-h-[45dvh] overflow-y-auto">
+              <div className="mt-5 rounded-[12px] bg-surface-2 overflow-hidden max-h-[45dvh] overflow-y-auto" data-no-swipe>
                 {aggregates.filter(a => a.key !== active.key).map(c => (
                   <button
                     key={c.key}

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Copy, Share, CornerDownRight, History, Plus, Timer, Trash2, X } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Copy, Eye, EyeOff, Share, CornerDownRight, History, NotebookPen, Plus, Timer, Trash2, X } from 'lucide-react'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
-import { AnimatePresence, motion, useMotionValue, useTransform } from 'framer-motion'
+import { AnimatePresence, animate, motion, useMotionValue, useTransform } from 'framer-motion'
 import {
   Button,
   Card,
@@ -17,6 +17,7 @@ import {
   SheetHeader,
   SheetTitle,
   Spinner,
+  Switch,
   Tag,
   useConfirm,
 } from '../components/ui'
@@ -46,8 +47,12 @@ import { setMaxWeightKg, setTotalReps, setVolumeKg } from '../lib/setMath'
 import { useSettings } from '../store/settings'
 import { RestTimer } from '../components/RestTimer'
 import { PlateCalculator } from '../components/PlateCalculator'
+import { DatePicker, type DayMark } from '../components/DatePicker'
 import { renderSessionImage, shareSessionImage } from '../lib/sessionImage'
 import { cn } from '../lib/cn'
+import { useAuth } from '../hooks/useAuth'
+import { groupReactions, listReactions, type Reaction } from '../lib/reactions'
+import { listExerciseNotes, setExerciseNote } from '../lib/exerciseNotes'
 
 type Unit = 'kg' | 'lb'
 
@@ -63,6 +68,10 @@ export function SessionPage() {
   const [pastPR, setPastPR] = useState<Record<string, number>>({}) // exercise name -> best kg before THIS session
   const [timerOpen, setTimerOpen] = useState(false)
   const [recapOpen, setRecapOpen] = useState(false)
+  const [dateOpen, setDateOpen] = useState(false)
+  const { user } = useAuth()
+  const [reactions, setReactions] = useState<Reaction[]>([])
+  const [exNotes, setExNotes] = useState<Map<string, string>>(new Map())
   const [allSessions, setAllSessions] = useState<Session[]>([])
   const [prToast, setPrToast] = useState<{ name: string; weight: number; bodyweight: boolean } | null>(null)
   const notesTimer = useRef<number | null>(null)
@@ -138,7 +147,46 @@ export function SessionPage() {
     })()
   }, [id])
 
+  // Friends' reactions on this session, and the per-exercise notes (both optional extras).
+  useEffect(() => {
+    if (!id || !user) return
+    let alive = true
+    listReactions(user.uid, id).then(r => { if (alive) setReactions(r) }).catch(() => {})
+    listExerciseNotes()
+      .then(list => { if (alive) setExNotes(new Map(list.map(n => [n.key, n.text]))) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [id, user])
+
+  async function onSaveNote(name: string, text: string) {
+    const key = normalizeExerciseName(name)
+    setExNotes(prev => {
+      const next = new Map(prev)
+      if (text.trim()) next.set(key, text.trim())
+      else next.delete(key)
+      return next
+    })
+    await setExerciseNote(key, name.trim(), text)
+  }
+
+  async function onToggleShared(next: boolean) {
+    if (!id || !data) return
+    setData({ ...data, shared: next })
+    await updateSession(id, { shared: next })
+  }
+
   const lastSimilar = useMemo(() => (data ? findLastSimilarSession(data, allSessions) : null), [data, allSessions])
+  // Days that already have another session, shown as dots in the date picker.
+  const dayMarks = useMemo(() => {
+    const m = new Map<string, DayMark>()
+    for (const s of allSessions) {
+      if (s.id === id) continue
+      const kind: DayMark = s.type === 'running' ? 'running' : 'strength'
+      const prev = m.get(s.date)
+      m.set(s.date, prev && prev !== kind ? 'both' : kind)
+    }
+    return m
+  }, [allSessions, id])
   const prevPerf = useMemo<Map<string, PreviousPerformance>>(
     () => (data ? buildPreviousPerformances(data, allSessions) : new Map()),
     [data, allSessions],
@@ -151,6 +199,14 @@ export function SessionPage() {
     notesTimer.current = window.setTimeout(() => {
       updateSession(id, { notes: v || null }).catch(() => {})
     }, 500)
+  }
+
+  /** Move the session to another day (the session keeps all its exercises and sets). */
+  async function onDateChange(next: string) {
+    if (!id || !data || !next || next === data.date) return
+    setData({ ...data, date: next })
+    setAllSessions(prev => prev.map(s => (s.id === id ? { ...s, date: next } : s)))
+    await updateSession(id, { date: next })
   }
 
   async function onAddExercise(name: string) {
@@ -209,9 +265,19 @@ export function SessionPage() {
             <ChevronLeft size={24} />
           </Button>
           {!running && <span className="w-11" aria-hidden />}
-          <p className="flex-1 min-w-0 text-center text-[15px] font-semibold first-letter:uppercase truncate">
-            {format(new Date(data.date + 'T12:00:00'), 'EEEE d MMMM', { locale: fr })}
-          </p>
+          <div className="flex-1 min-w-0 flex justify-center">
+            <button
+              type="button"
+              onClick={() => setDateOpen(true)}
+              aria-label="Changer la date de la séance"
+              className="flex items-center gap-1 min-w-0 h-10 pl-3.5 pr-2.5 rounded-full bg-surface-2/70 hover:bg-surface-2 active:bg-line cursor-pointer"
+            >
+              <span className="text-[15px] font-semibold first-letter:uppercase truncate">
+                {format(new Date(data.date + 'T12:00:00'), 'EEEE d MMMM', { locale: fr })}
+              </span>
+              <ChevronDown size={16} className="text-dim shrink-0" />
+            </button>
+          </div>
           <Button variant="ghost" size="icon" onClick={onShare} disabled={sharing} aria-label="Partager la séance en image" className="text-ink">
             <Share size={20} />
           </Button>
@@ -224,16 +290,32 @@ export function SessionPage() {
       </div>
 
       <div className="pt-5">
-        {running && <Tag tone="run" className="mb-3">Course</Tag>}
-        <textarea
-          value={notes}
-          onChange={e => onNotesChange(e.target.value)}
-          rows={1}
-          placeholder={running ? 'Nommer la sortie' : 'Nommer la séance'}
-          aria-label="Titre de la séance"
-          className="w-full resize-none bg-transparent t-title text-[32px] sm:text-[40px] placeholder:text-faint outline-none [field-sizing:content] focus-visible:outline-none"
-        />
+        {running ? (
+          <h1 className="t-title text-[32px] sm:text-[40px] flex items-center gap-3">
+            <Disc plate="run" size={28} /> Course
+          </h1>
+        ) : (
+          <textarea
+            value={notes}
+            onChange={e => onNotesChange(e.target.value)}
+            rows={1}
+            placeholder="Nommer la séance"
+            aria-label="Titre de la séance"
+            className="w-full resize-none bg-transparent t-title text-[32px] sm:text-[40px] placeholder:text-faint outline-none [field-sizing:content] focus-visible:outline-none"
+          />
+        )}
       </div>
+
+      {reactions.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5" aria-label="Réactions de tes amis">
+          {groupReactions(reactions).map(g => (
+            <span key={g.emoji} className="h-8 rounded-full bg-surface px-3 flex items-center gap-1.5 text-[13px]">
+              <span className="text-[15px]" aria-hidden>{g.emoji}</span>
+              <span className="text-dim truncate max-w-[14rem]">{g.people.map(p => p.name.split(/\s+/)[0]).join(', ')}</span>
+            </span>
+          ))}
+        </div>
+      )}
 
       {running ? (
         <RunningSessionView session={data} onChange={load} />
@@ -263,6 +345,8 @@ export function SessionPage() {
                 unit={unit}
                 previousPR={pastPR[ex.name.trim()] ?? 0}
                 previous={prevPerf.get(normalizeExerciseName(ex.name))}
+                note={exNotes.get(normalizeExerciseName(ex.name)) ?? ''}
+                onSaveNote={text => onSaveNote(ex.name, text)}
                 onChange={load}
                 onSetAdded={onSetAdded}
                 onSetRemoved={onSetRemoved}
@@ -279,7 +363,18 @@ export function SessionPage() {
         </>
       )}
 
-      <div className="mt-12 pt-5 hairline-t">
+      <label className="mt-12 flex items-center gap-3 rounded-[12px] bg-surface px-4 min-h-[56px] py-2 cursor-pointer">
+        {data.shared !== false ? <Eye size={18} className="text-dim shrink-0" /> : <EyeOff size={18} className="text-dim shrink-0" />}
+        <span className="flex-1 min-w-0">
+          <span className="block font-medium">Visible par tes amis</span>
+          <span className="block text-[13px] text-dim">
+            {data.shared !== false ? 'Tes amis voient cette séance et peuvent y réagir.' : 'Séance masquée : elle n’apparaît pas chez tes amis.'}
+          </span>
+        </span>
+        <Switch checked={data.shared !== false} onCheckedChange={onToggleShared} />
+      </label>
+
+      <div className="mt-5 pt-5 hairline-t">
         <Button variant="danger-soft" className="w-full" onClick={onDeleteSession}>
           <Trash2 size={16} /> Supprimer la séance
         </Button>
@@ -301,6 +396,15 @@ export function SessionPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <DatePicker
+        open={dateOpen}
+        onOpenChange={setDateOpen}
+        value={data.date}
+        onChange={onDateChange}
+        marks={dayMarks}
+        title={running ? 'Date de la sortie' : 'Date de la séance'}
+      />
 
       <RestTimer open={timerOpen} onClose={() => setTimerOpen(false)} defaultSeconds={restSeconds} />
 
@@ -408,6 +512,8 @@ function ExerciseCard({
   unit,
   previousPR,
   previous,
+  note,
+  onSaveNote,
   onChange,
   onSetAdded,
   onSetRemoved,
@@ -417,6 +523,8 @@ function ExerciseCard({
   unit: Unit
   previousPR: number
   previous?: PreviousPerformance
+  note: string
+  onSaveNote: (text: string) => Promise<void>
   onChange: () => void
   onSetAdded: (name: string, weightKg: number, bodyweight: boolean) => void
   onSetRemoved: (exerciseId: string, set: ExerciseSet, position: number) => void
@@ -427,13 +535,13 @@ function ExerciseCard({
   const [weight, setWeight] = useState('')
   const [adding, setAdding] = useState(false)
   const [platesOpen, setPlatesOpen] = useState(false)
+  const [editingNote, setEditingNote] = useState(false)
   const isBw = !!exercise.bodyweight
   const lastSet = exercise.sets[exercise.sets.length - 1]
   const bestKg = exercise.sets.reduce((m, s) => Math.max(m, setMaxWeightKg(s)), 0)
   const isPR = previousPR > 0 && bestKg > previousPR
-  const step = unit === 'kg' ? 2.5 : 5
 
-  // What to suggest in the quick-fill chips: this session's last set, else last time's first set.
+  // What to suggest in the quick-fill chip: this session's last set, else last time's first set.
   const reference = lastSet ?? previous?.sets[0]
 
   async function onAddSet(e: React.FormEvent) {
@@ -485,6 +593,17 @@ function ExerciseCard({
             </div>
           )}
         </div>
+        {!note && !editingNote && (
+          <button
+            type="button"
+            onClick={() => setEditingNote(true)}
+            className="h-11 w-11 -mt-2 grid place-items-center rounded-full text-faint hover:text-ink cursor-pointer shrink-0"
+            aria-label={`Ajouter une note à ${exercise.name}`}
+            title="Ajouter une note"
+          >
+            <NotebookPen size={18} />
+          </button>
+        )}
         <button
           onClick={async () => {
             const ok = await confirm({
@@ -497,12 +616,30 @@ function ExerciseCard({
             await deleteExercise(sessionId, exercise.id)
             onChange()
           }}
-          className="h-10 w-10 -mr-2 -mt-1.5 grid place-items-center rounded-full text-faint hover:text-danger cursor-pointer shrink-0"
+          className="h-11 w-11 -mr-2.5 -mt-2 grid place-items-center rounded-full text-faint hover:text-danger cursor-pointer shrink-0"
           aria-label={`Retirer ${exercise.name}`}
         >
           <X size={18} />
         </button>
       </header>
+
+      {editingNote ? (
+        <NoteEditor
+          initial={note}
+          onCancel={() => setEditingNote(false)}
+          onSave={async text => { await onSaveNote(text); setEditingNote(false) }}
+        />
+      ) : note ? (
+        <button
+          type="button"
+          onClick={() => setEditingNote(true)}
+          className="mt-2.5 w-full min-h-11 flex items-start gap-2 rounded-[10px] bg-surface-2/70 px-3 py-2.5 text-left cursor-pointer hover:bg-surface-2"
+          aria-label={`Modifier la note de ${exercise.name}`}
+        >
+          <NotebookPen size={15} className="text-dim shrink-0 mt-0.5" />
+          <span className="text-[14px] whitespace-pre-line">{note}</span>
+        </button>
+      ) : null}
 
       {previous && previous.sets.length > 0 && (
         <div className="mt-3 flex items-baseline gap-2 text-[13px] min-w-0">
@@ -564,16 +701,6 @@ function ExerciseCard({
                 {lastSet ? 'Refaire' : 'Comme la dernière fois'} <span className="num text-[16px]">{reference.reps}×{loadText(Number(reference.weight), unit, isBw)}</span>
               </QuickChip>
             )}
-            {reference && !isBw && (
-              <QuickChip onClick={() => fill(reference.reps, Number(reference.weight) + toKg(step, unit))}>
-                <span className="num text-[16px]">+{frNum(step, 1)}</span> {unit}
-              </QuickChip>
-            )}
-            {reference && (
-              <QuickChip onClick={() => fill(reference.reps + 1, Number(reference.weight))}>
-                <span className="num text-[16px]">+1</span> rep
-              </QuickChip>
-            )}
             {!isBw && (
               <QuickChip onClick={() => setPlatesOpen(true)}>
                 <Disc size={15} /> Disques
@@ -594,6 +721,38 @@ function ExerciseCard({
         />
       )}
     </Card>
+  )
+}
+
+/** Inline editor for the per-exercise note (saved for every session with this exercise). */
+function NoteEditor({ initial, onSave, onCancel }: { initial: string; onSave: (text: string) => Promise<void>; onCancel: () => void }) {
+  const [text, setText] = useState(initial)
+  const [saving, setSaving] = useState(false)
+  return (
+    <form
+      className="mt-2.5"
+      onSubmit={async e => {
+        e.preventDefault()
+        setSaving(true)
+        try { await onSave(text) } finally { setSaving(false) }
+      }}
+    >
+      <textarea
+        value={text}
+        onChange={e => setText(e.target.value)}
+        autoFocus
+        rows={2}
+        maxLength={1000}
+        placeholder="Réglage du siège, prise, sensations…"
+        aria-label="Note sur l’exercice"
+        className="w-full resize-none rounded-[10px] bg-surface-2 px-3 py-2 text-[15px] outline-none placeholder:text-faint focus:shadow-[inset_0_0_0_1.5px_var(--color-ink)] [field-sizing:content] min-h-[3.5rem]"
+      />
+      <div className="flex items-center gap-2 mt-2">
+        <Button type="submit" size="sm" disabled={saving}>Enregistrer</Button>
+        <Button type="button" size="sm" variant="ghost" onClick={onCancel}>Annuler</Button>
+        <span className="ml-auto text-[12px] text-faint">Gardée pour toutes tes séances</span>
+      </div>
+    </form>
   )
 }
 
@@ -632,7 +791,7 @@ function QuickChip({ children, onClick }: { children: React.ReactNode; onClick: 
     <button
       type="button"
       onClick={onClick}
-      className="h-9 shrink-0 rounded-full bg-surface-2 px-3.5 text-[13px] font-semibold text-ink flex items-center gap-1 cursor-pointer active:bg-line"
+      className="h-10 shrink-0 rounded-full bg-surface-2 px-4 text-[13px] font-semibold text-ink flex items-center gap-1 cursor-pointer active:bg-line"
     >
       {children}
     </button>
@@ -733,7 +892,7 @@ function SetRow({
           </button>
         </form>
       ) : (
-        <SwipeRow onSwipeLeft={remove} onSwipeRight={duplicate}>
+        <SwipeRow onSwipeLeft={remove} onSwipeRight={duplicate} nudge={index === 1}>
         <div className="flex items-center gap-1 pl-4 pr-2 h-[52px] bg-surface">
           <span className="w-6 num-light text-[15px] text-faint text-center shrink-0" aria-label={`Série ${index}`}>{index}</span>
           <button onClick={startEdit} className="flex-1 flex items-baseline gap-2 pl-2 h-full cursor-pointer text-left" aria-label={`Modifier la série ${index}`}>
@@ -1030,8 +1189,21 @@ const SWIPE_HINT_KEY = 'fit-tracker:swipe-hint-seen'
 const SWIPE_THRESHOLD = 96
 
 /** Swipe left to delete, right to duplicate. Taps still go through to the row. */
-function SwipeRow({ children, onSwipeLeft, onSwipeRight }: { children: React.ReactNode; onSwipeLeft: () => void; onSwipeRight: () => void }) {
+function SwipeRow({ children, onSwipeLeft, onSwipeRight, nudge }: { children: React.ReactNode; onSwipeLeft: () => void; onSwipeRight: () => void; nudge?: boolean }) {
   const x = useMotionValue(0)
+
+  // Until the gesture has been used once, the first set of each exercise slides a little
+  // to the left and back, uncovering "Supprimer", to show that rows can be swiped.
+  useEffect(() => {
+    if (!nudge) return
+    let seen = true
+    try { seen = !!localStorage.getItem(SWIPE_HINT_KEY) } catch { /* ignore */ }
+    if (seen || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const t = window.setTimeout(() => {
+      animate(x, [0, -56, 0], { duration: 1.1, times: [0, 0.4, 1], ease: 'easeInOut' })
+    }, 700)
+    return () => window.clearTimeout(t)
+  }, [nudge, x])
   const leftOpacity = useTransform(x, [0, SWIPE_THRESHOLD], [0, 1])
   const rightOpacity = useTransform(x, [-SWIPE_THRESHOLD, 0], [1, 0])
   const dragged = useRef(false)
@@ -1079,8 +1251,8 @@ function SwipeHint() {
   })
   if (!show) return null
   return (
-    <p className="sm:hidden text-[12px] text-faint px-0 pt-2">
-      Glisse une série vers la gauche pour la supprimer, vers la droite pour la dupliquer.
+    <p className="sm:hidden flex items-center gap-1.5 text-[13px] text-dim pt-2.5">
+      <span aria-hidden>←</span> Glisse une série pour la supprimer, <span aria-hidden>→</span> pour la dupliquer
     </p>
   )
 }

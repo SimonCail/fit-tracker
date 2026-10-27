@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, NotebookPen } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { Card, EmptyState, SectionTitle, Skeleton, Tag } from '../components/ui'
+import { Button, Card, EmptyState, SectionTitle, Skeleton, Tag } from '../components/ui'
 import { PageHeader } from '../components/Layout'
 import { listSessions } from '../lib/db'
 import type { ExerciseSet, Session } from '../lib/types'
@@ -12,6 +12,7 @@ import { normalizeExerciseName } from '../lib/exerciseName'
 import { estimate1RM, frNum, fromKg, round } from '../lib/units'
 import { setMaxWeightKg, setTotalReps, setVolumeKg } from '../lib/setMath'
 import { useSettings } from '../store/settings'
+import { listExerciseNotes, setExerciseNote } from '../lib/exerciseNotes'
 import { cn } from '../lib/cn'
 
 type HistorySet = ExerciseSet & { sessionId: string; date: string }
@@ -23,12 +24,21 @@ export function ExerciseHistoryPage() {
   const { unit } = useSettings()
   const [sessions, setSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(true)
+  const [note, setNote] = useState('')
+
+  const normKey = params.get('key') || slug || ''
 
   useEffect(() => {
     listSessions(500).then(setSessions).finally(() => setLoading(false))
   }, [])
 
-  const normKey = params.get('key') || slug || ''
+  useEffect(() => {
+    let alive = true
+    listExerciseNotes()
+      .then(list => { if (alive) setNote(list.find(n => n.key === normKey)?.text ?? '') })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [normKey])
 
   const { displayName, allSets, byDate, record, best1RM, volumeTotal, bodyweight } = useMemo(() => {
     const sets: HistorySet[] = []
@@ -120,12 +130,20 @@ export function ExerciseHistoryPage() {
         <p className="text-[12px] text-faint mt-2 px-1">1RM estimé avec la formule de Brzycki, à partir de ta meilleure série de 12 reps ou moins.</p>
       )}
 
+      <ExerciseNoteCard
+        note={note}
+        onSave={async text => {
+          await setExerciseNote(normKey, displayName, text)
+          setNote(text.trim())
+        }}
+      />
+
       {chartData.length >= 2 && (
         <section className="mt-8">
           <SectionTitle>Charge max par séance</SectionTitle>
           <Card className="p-4 sm:p-5">
             <div className="h-48 sm:h-56 -ml-2 -mr-1">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 320, height: 200 }}>
                 <AreaChart data={chartData} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
                   <defs>
                     <linearGradient id="liftFill" x1="0" y1="0" x2="0" y2="1">
@@ -182,7 +200,7 @@ export function ExerciseHistoryPage() {
               <Card key={date} className="overflow-hidden">
                 <button
                   onClick={() => nav(`/session/${sets[0].sessionId}`)}
-                  className="w-full flex items-center gap-2 px-4 pt-3.5 pb-2 text-left cursor-pointer"
+                  className="w-full flex items-center gap-2 px-4 pt-3.5 pb-2 min-h-11 text-left cursor-pointer"
                 >
                   <span className="font-semibold first-letter:uppercase">{format(parseISO(date), 'EEEE d MMMM yyyy', { locale: fr })}</span>
                   {hasRecord && <Tag tone="pr">Record</Tag>}
@@ -215,6 +233,54 @@ export function ExerciseHistoryPage() {
         </div>
       </section>
     </>
+  )
+}
+
+/** The lasting note for this exercise (same as in sessions), editable here too. */
+function ExerciseNoteCard({ note, onSave }: { note: string; onSave: (text: string) => Promise<void> }) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(note)
+  const [saving, setSaving] = useState(false)
+
+  if (editing) {
+    return (
+      <form
+        className="mt-4"
+        onSubmit={async e => {
+          e.preventDefault()
+          setSaving(true)
+          try { await onSave(text); setEditing(false) } finally { setSaving(false) }
+        }}
+      >
+        <textarea
+          value={text}
+          onChange={e => setText(e.target.value)}
+          autoFocus
+          rows={2}
+          maxLength={1000}
+          placeholder="Réglage du siège, prise, sensations…"
+          aria-label="Note sur l’exercice"
+          className="w-full resize-none rounded-[12px] bg-surface px-4 py-3 text-[15px] outline-none placeholder:text-faint focus:shadow-[inset_0_0_0_1.5px_var(--color-ink)] [field-sizing:content] min-h-[4rem]"
+        />
+        <div className="flex gap-2 mt-2">
+          <Button type="submit" size="sm" disabled={saving}>Enregistrer</Button>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>Annuler</Button>
+        </div>
+      </form>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => { setText(note); setEditing(true) }}
+      className="mt-4 w-full min-h-12 flex items-start gap-2.5 rounded-[var(--radius-card)] bg-surface px-4 py-3 text-left cursor-pointer hover:bg-surface-2/60"
+    >
+      <NotebookPen size={17} className="text-dim shrink-0 mt-0.5" />
+      {note
+        ? <span className="text-[15px] whitespace-pre-line">{note}</span>
+        : <span className="text-[15px] text-dim">Ajouter une note (réglages, prise, sensations…)</span>}
+    </button>
   )
 }
 

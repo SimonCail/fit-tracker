@@ -29,6 +29,7 @@ import { dateToDayKey, useSettings } from '../store/settings'
 import { maybeFireReminder } from '../lib/notifications'
 import { MonthlyCalendar } from '../components/MonthlyCalendar'
 import { weeklyAverage } from '../lib/weightTrend'
+import { weeklyStreak } from '../lib/streak'
 import { cn } from '../lib/cn'
 
 const todayIso = () => format(new Date(), 'yyyy-MM-dd')
@@ -37,6 +38,7 @@ export function Today() {
   const nav = useNavigate()
   const { openNewSession } = useLayout()
   const { unit, profile, weeklyPlan, reminders } = useSettings()
+  const weeklyGoal = useSettings(s => s.weeklyGoal ?? 2)
   const [loading, setLoading] = useState(true)
   const [sessions, setSessions] = useState<Session[]>([])
   const [weighIns, setWeighIns] = useState<WeighIn[]>([])
@@ -86,7 +88,8 @@ export function Today() {
     }
     return acc
   }, 0)
-  const streak = computeStreak(sessions)
+  // Same regularity streak as on the Progrès page: weeks in a row with the weekly goal met.
+  const streak = useMemo(() => weeklyStreak(sessions, weeklyGoal).current, [sessions, weeklyGoal])
   const sessionCounts = useMemo(() => {
     const out: Record<string, number> = {}
     for (const s of sessions) out[s.date] = (out[s.date] ?? 0) + 1
@@ -129,7 +132,15 @@ export function Today() {
           onOther={openNewSession}
         />
 
-        <Week sessions={sessions} streak={streak} weekCount={weekSessions.length} weekVolumeKg={weekVolume} unit={unit} />
+        <Week
+          sessions={sessions}
+          streak={streak}
+          goal={weeklyGoal}
+          weekCount={weekSessions.length}
+          weekVolumeKg={weekVolume}
+          unit={unit}
+          onStreakClick={() => nav('/evolution')}
+        />
 
         <WeightBlock unit={unit} weighIns={weighIns} onChanged={load} />
         </div>
@@ -150,7 +161,7 @@ export function Today() {
           <section>
             <SectionTitle
               action={
-                <button onClick={() => nav('/history')} className="text-[14px] link">
+                <button onClick={() => nav('/history')} className="text-[14px] link h-10 -my-2">
                   Tout le journal
                 </button>
               }
@@ -245,15 +256,19 @@ function TodayAction({
 function Week({
   sessions,
   streak,
+  goal,
   weekCount,
   weekVolumeKg,
   unit,
+  onStreakClick,
 }: {
   sessions: Session[]
   streak: number
+  goal: number
   weekCount: number
   weekVolumeKg: number
   unit: 'kg' | 'lb'
+  onStreakClick: () => void
 }) {
   const monday = startOfWeek(new Date(), { weekStartsOn: 1 })
   const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i))
@@ -301,15 +316,22 @@ function Week({
             )
           })}
         </ol>
-        <dl className="grid grid-cols-3 mt-3 hairline-t">
-          <Figure value={String(streak)} unit={streak > 1 ? 'jours' : 'jour'} label="d’affilée" />
+        <div className="grid grid-cols-3 mt-3 hairline-t">
+          <button
+            type="button"
+            onClick={onStreakClick}
+            className="cursor-pointer rounded-[10px] hover:bg-surface-2/60 active:bg-surface-2"
+            aria-label={`Série : ${streak} semaine${streak > 1 ? 's' : ''} de suite à ${goal} séance${goal > 1 ? 's' : ''} ou plus. Voir la régularité`}
+          >
+            <Figure value={String(streak)} unit="sem." label="de suite" />
+          </button>
           <Figure value={String(weekCount)} unit={weekCount > 1 ? 'séances' : 'séance'} label="en 7 jours" />
           <Figure
             value={tonnage >= 1000 ? frNum(tonnage / 1000, 1) : String(Math.round(tonnage))}
             unit={tonnage >= 1000 ? (unit === 'kg' ? 't' : 'k lb') : unit}
             label="soulevées"
           />
-        </dl>
+        </div>
       </Card>
     </section>
   )
@@ -318,11 +340,11 @@ function Week({
 function Figure({ value, unit, label }: { value: string; unit: string; label: string }) {
   return (
     <div className="px-2 py-3.5 text-center">
-      <dd className="flex items-baseline justify-center gap-1">
+      <p className="flex items-baseline justify-center gap-1">
         <span className="num text-[32px]">{value}</span>
         <span className="text-[13px] font-semibold text-dim">{unit}</span>
-      </dd>
-      <dt className="text-[12px] text-faint mt-1 leading-tight">{label}</dt>
+      </p>
+      <p className="text-[12px] text-faint mt-1 leading-tight">{label}</p>
     </div>
   )
 }
@@ -344,7 +366,7 @@ function WeightBlock({ unit, weighIns, onChanged }: { unit: 'kg' | 'lb'; weighIn
         action={
           <button
             onClick={() => setOtherOpen(true)}
-            className="text-[14px] link"
+            className="text-[14px] link h-10 -my-2"
           >
             Autre date
           </button>
@@ -496,7 +518,7 @@ function WeightSlotRow({
           </span>
         )}
       </button>
-      <button onClick={remove} className="h-10 w-10 -mr-2 grid place-items-center rounded-full text-faint hover:text-danger cursor-pointer" aria-label="Supprimer">
+      <button onClick={remove} className="h-11 w-11 -mr-2.5 grid place-items-center rounded-full text-faint hover:text-danger cursor-pointer" aria-label={`Supprimer la pesée du ${label.toLowerCase()}`}>
         <X size={18} />
       </button>
     </div>
@@ -627,19 +649,6 @@ function relativeDay(iso: string): string {
   if (diff === 1) return 'hier'
   if (diff < 7) return format(parseISO(iso), 'EEEE', { locale: fr })
   return format(parseISO(iso), 'd MMM', { locale: fr })
-}
-
-function computeStreak(sessions: Session[]): number {
-  if (sessions.length === 0) return 0
-  const days = new Set(sessions.map(s => s.date))
-  let streak = 0
-  const cursor = new Date()
-  if (!days.has(format(cursor, 'yyyy-MM-dd'))) cursor.setDate(cursor.getDate() - 1)
-  while (days.has(format(cursor, 'yyyy-MM-dd'))) {
-    streak++
-    cursor.setDate(cursor.getDate() - 1)
-  }
-  return streak
 }
 
 function greeting(name: string | null): string {

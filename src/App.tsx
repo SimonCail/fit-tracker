@@ -10,19 +10,40 @@ import { Evolution } from './pages/Evolution'
 import { ExercisesPage } from './pages/Exercises'
 import { ExerciseHistoryPage } from './pages/ExerciseHistory'
 import { RecordsPage } from './pages/Records'
+import { FriendsPage } from './pages/Friends'
+import { FriendProfilePage } from './pages/FriendProfile'
 import { ConfirmProvider, Disc, TooltipProvider } from './components/ui'
 import { PwaUpdateBanner } from './components/PwaUpdateBanner'
 import { applyTheme, useSettings, watchSystemTheme } from './store/settings'
 import { deviceTimezone, readPrefs, writePrefs } from './lib/prefsSync'
+import { ensureProfile } from './lib/friends'
+import { backfillSharedFlag } from './lib/db'
 
 function App() {
   const { user, loading } = useAuth()
   const theme = useSettings(s => s.theme)
+  const profileName = useSettings(s => s.profile.name)
 
   useEffect(() => {
     applyTheme(theme)
     if (theme === 'system') return watchSystemTheme(() => applyTheme('system'))
   }, [theme])
+
+  // Public profile (friend code + display name). Debounced so typing a name in Settings
+  // doesn't write on every keystroke.
+  useEffect(() => {
+    if (!user) return
+    const t = window.setTimeout(() => {
+      ensureProfile(user, profileName).catch(e => console.warn('ensureProfile failed', e))
+    }, 1500)
+    return () => window.clearTimeout(t)
+  }, [user, profileName])
+
+  // Old sessions predate the "visible to friends" flag: stamp them once.
+  useEffect(() => {
+    if (!user) return
+    backfillSharedFlag().catch(e => console.warn('backfillSharedFlag failed', e))
+  }, [user])
 
   // Sync weeklyPlan/reminders with Firestore (needed for Cloud Function reminders).
   useEffect(() => {
@@ -87,6 +108,8 @@ function App() {
               <Route path="exercises" element={<ExercisesPage />} />
               <Route path="exercise/:slug" element={<ExerciseHistoryPage />} />
               <Route path="records" element={<RecordsPage />} />
+              <Route path="friends" element={<FriendsPage />} />
+              <Route path="friends/:uid" element={<FriendProfilePage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>

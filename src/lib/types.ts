@@ -29,6 +29,8 @@ export type Session = {
   createdAt: number
   type: SessionType
   exercises: Exercise[]
+  /** Visible to friends. Missing or true = visible; false hides the session from them. */
+  shared?: boolean
   // Running-specific fields (ignored for strength sessions).
   distanceMeters?: number | null
   durationSeconds?: number | null

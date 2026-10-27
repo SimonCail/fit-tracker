@@ -1,10 +1,12 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { signOut } from 'firebase/auth'
-import { Download, LogOut, Monitor, Moon, Sun } from 'lucide-react'
+import { Check, Download, LogOut, Trash2, Upload } from 'lucide-react'
 import { auth } from '../lib/firebase'
-import { Button, Segmented, Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle, Switch } from './ui'
-import { DAY_KEYS, DAY_LABELS, useSettings } from '../store/settings'
-import { listSessions, listWeighIns } from '../lib/db'
+import { Button, Segmented, Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle, Switch, useConfirm } from './ui'
+import { DAY_KEYS, DAY_LABELS, THEMES, useSettings, type ThemeMeta } from '../store/settings'
+import { BackupError, downloadBackup, importBackup, parseBackupFile } from '../lib/backup'
+import { getNotifyPrefs, setNotifyPref, type NotifyKind, type NotifyPrefs } from '../lib/friendNotify'
+import { DeleteAccountDialog } from './DeleteAccountDialog'
 import { useAuth } from '../hooks/useAuth'
 import { notificationPermission, requestNotificationPermission } from '../lib/notifications'
 import { fcmConfigured, registerFCM, unregisterFCM } from '../lib/fcm'
@@ -20,10 +22,64 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
   const { user } = useAuth()
   const [exporting, setExporting] = useState(false)
   const [permission, setPermission] = useState<NotificationPermission>('default')
+  const [notifyPrefs, setNotifyPrefs] = useState<NotifyPrefs>({ friendRequests: false, reactions: false })
+  const [notifyBusy, setNotifyBusy] = useState(false)
+  const friendNotif = notifyPrefs.friendRequests || notifyPrefs.reactions
+  const [importMsg, setImportMsg] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
+  const [importing, setImporting] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const confirm = useConfirm()
 
   useEffect(() => {
-    if (open) setPermission(notificationPermission())
-  }, [open])
+    if (!open) return
+    setPermission(notificationPermission())
+    setImportMsg(null)
+    if (user) getNotifyPrefs(user.uid).then(setNotifyPrefs).catch(() => {})
+  }, [open, user])
+
+  async function toggleNotify(kind: NotifyKind, next: boolean) {
+    if (!user) return
+    setNotifyBusy(true)
+    try {
+      const res = await setNotifyPref(user.uid, kind, next)
+      const prefs = { ...notifyPrefs, [kind]: res }
+      setNotifyPrefs(prefs)
+      setPermission(notificationPermission())
+      // Same device token as the reminders: drop it only when nothing needs it any more.
+      if (!prefs.friendRequests && !prefs.reactions && !reminders.enabled) await unregisterFCM(user.uid)
+    } finally {
+      setNotifyBusy(false)
+    }
+  }
+
+  async function onPickImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setImportMsg(null)
+    try {
+      const backup = await parseBackupFile(file)
+      const parts = [
+        `${backup.sessions.length} séance${backup.sessions.length > 1 ? 's' : ''}`,
+        `${backup.weighIns.length} pesée${backup.weighIns.length > 1 ? 's' : ''}`,
+        ...(backup.exerciseNotes?.length ? [`${backup.exerciseNotes.length} note${backup.exerciseNotes.length > 1 ? 's' : ''}`] : []),
+      ]
+      const ok = await confirm({
+        title: 'Importer ce fichier ?',
+        description: `${parts.join(', ')}. Ce qui est déjà dans ton compte est gardé ; si une séance du fichier existe déjà (même export), elle est remplacée par celle du fichier.`,
+        confirmLabel: 'Importer',
+      })
+      if (!ok) return
+      setImporting(true)
+      const res = await importBackup(backup)
+      setImportMsg({ tone: 'ok', text: `Import terminé : ${res.sessions} séances et ${res.weighIns} pesées. Recharge la page pour tout voir.` })
+    } catch (err) {
+      setImportMsg({ tone: 'error', text: err instanceof BackupError ? err.message : 'Import impossible. Vérifie ta connexion et réessaie.' })
+    } finally {
+      setImporting(false)
+    }
+  }
 
   async function toggleReminders(next: boolean) {
     if (next) {
@@ -31,7 +87,7 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
       setPermission(p)
       if (p !== 'granted') return
       if (user && fcmConfigured) await registerFCM(user.uid)
-    } else if (user) {
+    } else if (user && !friendNotif) {
       await unregisterFCM(user.uid)
     }
     setReminders({ enabled: next })
@@ -40,15 +96,7 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
   async function onExport() {
     setExporting(true)
     try {
-      const [sessions, weighIns] = await Promise.all([listSessions(500), listWeighIns(500)])
-      const payload = { exportedAt: new Date().toISOString(), user: user?.email ?? null, sessions, weighIns }
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `fit-tracker-${new Date().toISOString().slice(0, 10)}.json`
-      a.click()
-      URL.revokeObjectURL(url)
+      await downloadBackup()
     } finally {
       setExporting(false)
     }
@@ -64,19 +112,14 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
         </SheetHeader>
         <SheetBody className="space-y-7 pt-3">
           <Group title="Affichage">
-            <Row label="Thème">
-              <Segmented
-                size="sm"
-                className="w-[200px]"
-                value={theme}
-                onChange={setTheme}
-                options={[
-                  { value: 'light', label: <Sun size={16} aria-label="Clair" /> },
-                  { value: 'dark', label: <Moon size={16} aria-label="Sombre" /> },
-                  { value: 'system', label: <Monitor size={16} aria-label="Comme l’appareil" /> },
-                ]}
-              />
-            </Row>
+            <div className="px-4 py-3.5 hairline-b">
+              <p className="font-medium mb-3">Thème</p>
+              <div role="radiogroup" aria-label="Thème" className="grid grid-cols-4 gap-x-2 gap-y-3">
+                {THEMES.map(t => (
+                  <ThemeSwatch key={t.value} theme={t} active={theme === t.value} onPick={() => setTheme(t.value)} />
+                ))}
+              </div>
+            </div>
             <Row label="Unité">
               <Segmented
                 size="sm"
@@ -98,13 +141,13 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
                     aria-pressed={restSeconds === s}
                     className={cn(
                       'h-11 rounded-[12px] num text-[20px] cursor-pointer transition-colors',
-                      restSeconds === s ? 'bg-ink text-bg' : 'bg-surface-2 text-ink',
+                      restSeconds === s ? 'bg-accent text-on-accent' : 'bg-surface-2 text-ink',
                     )}
                   >
                     {Math.floor(s / 60)}:{String(s % 60).padStart(2, '0')}
                   </button>
                 ))}
-                <label className={cn('relative h-11 rounded-[12px] flex items-center justify-center', customRest ? 'bg-ink text-bg' : 'bg-surface-2 text-ink')}>
+                <label className={cn('relative h-11 rounded-[12px] flex items-center justify-center', customRest ? 'bg-accent text-on-accent' : 'bg-surface-2 text-ink')}>
                   <input
                     type="number"
                     min={15}
@@ -187,21 +230,93 @@ export function SettingsSheet({ open, onOpenChange }: { open: boolean; onOpenCha
             )}
           </Group>
 
+          <Group
+            title="Amis"
+            hint={
+              !fcmConfigured
+                ? 'Les notifications ne sont pas configurées sur cette version de l’app.'
+                : permission === 'denied'
+                  ? 'Les notifications sont bloquées pour ce site. Autorise-les dans les réglages du navigateur.'
+                  : 'Notifications sur ce téléphone. Une seule par ami et par séance pour les réactions.'
+            }
+          >
+            <Row label="Demandes d’ami">
+              <Switch checked={notifyPrefs.friendRequests} disabled={notifyBusy || !fcmConfigured} onCheckedChange={v => toggleNotify('friendRequests', v)} />
+            </Row>
+            <Row label="Réactions à mes séances">
+              <Switch checked={notifyPrefs.reactions} disabled={notifyBusy || !fcmConfigured} onCheckedChange={v => toggleNotify('reactions', v)} />
+            </Row>
+          </Group>
+
           <Group title="Compte">
             <div className="px-4 py-3.5 hairline-b text-[15px] text-dim break-all">{user?.email ?? user?.displayName ?? 'Connecté'}</div>
             <button onClick={onExport} disabled={exporting} className="w-full flex items-center gap-3 px-4 h-[52px] hairline-b text-left cursor-pointer active:bg-surface-2 disabled:opacity-50">
               <Download size={18} className="text-dim" />
               <span className="flex-1 font-medium">{exporting ? 'Export en cours…' : 'Exporter mes données (JSON)'}</span>
             </button>
+            <button onClick={() => fileRef.current?.click()} disabled={importing} className="w-full flex items-center gap-3 px-4 h-[52px] hairline-b text-left cursor-pointer active:bg-surface-2 disabled:opacity-50">
+              <Upload size={18} className="text-dim" />
+              <span className="flex-1 font-medium">{importing ? 'Import en cours…' : 'Importer un export (JSON)'}</span>
+            </button>
+            <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={onPickImport} />
+            {importMsg && (
+              <p role={importMsg.tone === 'error' ? 'alert' : 'status'} className={cn('px-4 py-3 hairline-b text-[14px]', importMsg.tone === 'error' ? 'text-danger' : 'text-dim')}>
+                {importMsg.text}
+              </p>
+            )}
             <button onClick={() => signOut(auth)} className="w-full flex items-center gap-3 px-4 h-[52px] text-left cursor-pointer active:bg-surface-2 text-danger">
               <LogOut size={18} />
               <span className="flex-1 font-medium">Se déconnecter</span>
             </button>
           </Group>
+          <button
+            onClick={() => setDeleteOpen(true)}
+            className="w-full flex items-center justify-center gap-2 h-11 rounded-[12px] text-[14px] font-semibold text-danger/80 hover:text-danger hover:bg-danger/10 cursor-pointer"
+          >
+            <Trash2 size={16} /> Supprimer mon compte
+          </button>
+          {user && <DeleteAccountDialog open={deleteOpen} onOpenChange={setDeleteOpen} user={user} />}
           <Button variant="ghost" className="w-full sm:hidden" onClick={() => onOpenChange(false)}>Fermer</Button>
         </SheetBody>
       </SheetContent>
     </Sheet>
+  )
+}
+
+/** A little preview of the theme: its background, a card, and its accent colour. */
+function ThemeSwatch({ theme, active, onPick }: { theme: ThemeMeta; active: boolean; onPick: () => void }) {
+  const auto = theme.value === 'system'
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      onClick={onPick}
+      className="flex flex-col items-center gap-1.5 cursor-pointer group"
+    >
+      <span
+        className={cn(
+          'relative w-full aspect-square max-w-[64px] rounded-[14px] overflow-hidden transition-shadow',
+          active ? 'shadow-[0_0_0_2px_var(--color-surface),0_0_0_4px_var(--color-ink)]' : 'shadow-[inset_0_0_0_1px_var(--color-line-strong)]',
+        )}
+        style={{ background: auto ? `linear-gradient(135deg, #000 50%, #F2F2EF 50%)` : theme.bg }}
+      >
+        {!auto && (
+          <>
+            <span className="absolute left-[18%] right-[18%] top-[22%] h-[30%] rounded-[6px]" style={{ background: theme.surface }} />
+            <span className="absolute left-[18%] bottom-[16%] h-[22%] w-[38%] rounded-full" style={{ background: theme.accent }} />
+          </>
+        )}
+        {active && (
+          <span className="absolute right-1 bottom-1 h-5 w-5 rounded-full bg-ink text-bg grid place-items-center">
+            <Check size={12} strokeWidth={3} />
+          </span>
+        )}
+      </span>
+      <span className={cn('text-[12px] leading-none', active ? 'font-bold text-ink' : 'font-medium text-dim group-hover:text-ink')}>
+        {theme.label}
+      </span>
+    </button>
   )
 }
 

@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { ChevronLeft, House, BookOpen, TrendingUp, Dumbbell, Plus, Settings } from 'lucide-react'
+import { ChevronLeft, House, BookOpen, TrendingUp, Dumbbell, Plus, Settings, Users } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { Button, Disc } from './ui'
 import { SettingsSheet } from './Settings'
@@ -9,12 +9,25 @@ import { SyncNotice } from './SyncNotice'
 import { LayoutCtx, useLayout } from './layoutContext'
 import { cn } from '../lib/cn'
 
-const TABS = [
-  { to: '/', label: 'Accueil', icon: House, end: true },
-  { to: '/history', label: 'Journal', icon: BookOpen },
-  { to: '/evolution', label: 'Progrès', icon: TrendingUp },
-  { to: '/exercises', label: 'Exercices', icon: Dumbbell },
-] as const
+type Tab = {
+  to: string
+  label: string
+  icon: typeof House
+  end?: boolean
+  /** Other pages that belong to this tab (keeps it highlighted there). */
+  also?: string[]
+}
+
+const HOME: Tab = { to: '/', label: 'Accueil', icon: House, end: true }
+const JOURNAL: Tab = { to: '/history', label: 'Journal', icon: BookOpen, also: ['/session/'] }
+const PROGRESS: Tab = { to: '/evolution', label: 'Progrès', icon: TrendingUp, also: ['/records', '/exercises', '/exercise/'] }
+const EXERCISES: Tab = { to: '/exercises', label: 'Exercices', icon: Dumbbell, also: ['/exercise/'] }
+const FRIENDS: Tab = { to: '/friends', label: 'Amis', icon: Users }
+
+// Phone: 4 tabs around the big "+" button; Exercices is reached from Progrès.
+const MOBILE_TABS: Tab[] = [HOME, JOURNAL, PROGRESS, FRIENDS]
+// Desktop has room for everything.
+const DESKTOP_TABS: Tab[] = [HOME, JOURNAL, { ...PROGRESS, also: ['/records'] }, EXERCISES, FRIENDS]
 
 export function Layout() {
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -52,8 +65,9 @@ export function Layout() {
   )
 }
 
-function isActive(pathname: string, to: string, end?: boolean) {
-  return end ? pathname === to : pathname.startsWith(to)
+function isActive(pathname: string, tab: Tab) {
+  if (tab.end) return pathname === tab.to
+  return pathname.startsWith(tab.to) || (tab.also ?? []).some(p => pathname.startsWith(p))
 }
 
 function DesktopBar({ pathname }: { pathname: string }) {
@@ -66,8 +80,8 @@ function DesktopBar({ pathname }: { pathname: string }) {
           <span className="t-heading text-[18px]">Fit</span>
         </Link>
         <nav className="flex-1 flex items-center gap-1">
-          {TABS.map(t => {
-            const active = isActive(pathname, t.to, 'end' in t ? t.end : false)
+          {DESKTOP_TABS.map(t => {
+            const active = isActive(pathname, t)
             return (
               <Link
                 key={t.to}
@@ -82,7 +96,7 @@ function DesktopBar({ pathname }: { pathname: string }) {
                 {active && (
                   <motion.span
                     layoutId="desktop-tab"
-                    className="absolute left-3 right-3 bottom-0 h-[2px] bg-ink"
+                    className="absolute left-3 right-3 bottom-0 h-[2px] bg-accent"
                     transition={{ type: 'spring', stiffness: 500, damping: 40 }}
                   />
                 )}
@@ -102,7 +116,7 @@ function DesktopBar({ pathname }: { pathname: string }) {
 }
 
 function MobileTabBar({ pathname, onNew }: { pathname: string; onNew: () => void }) {
-  const [left, right] = [TABS.slice(0, 2), TABS.slice(2)]
+  const [left, right] = [MOBILE_TABS.slice(0, 2), MOBILE_TABS.slice(2)]
   return (
     <nav
       aria-label="Navigation principale"
@@ -114,7 +128,7 @@ function MobileTabBar({ pathname, onNew }: { pathname: string; onNew: () => void
           <button
             onClick={onNew}
             aria-label="Nouvelle séance"
-            className="h-12 w-12 rounded-full bg-ink text-bg grid place-items-center active:scale-95 transition-transform cursor-pointer"
+            className="h-12 w-12 rounded-full bg-accent text-on-accent grid place-items-center active:scale-95 transition-transform cursor-pointer"
           >
             <Plus size={24} strokeWidth={2.5} />
           </button>
@@ -125,8 +139,8 @@ function MobileTabBar({ pathname, onNew }: { pathname: string; onNew: () => void
   )
 }
 
-function TabLink({ tab, pathname }: { tab: (typeof TABS)[number]; pathname: string }) {
-  const active = isActive(pathname, tab.to, 'end' in tab ? tab.end : false)
+function TabLink({ tab, pathname }: { tab: Tab; pathname: string }) {
+  const active = isActive(pathname, tab)
   const Icon = tab.icon
   return (
     <Link
@@ -144,8 +158,7 @@ function TabLink({ tab, pathname }: { tab: (typeof TABS)[number]; pathname: stri
 }
 
 /**
- * Page header. Mobile shows the settings button on top-level pages (desktop has it in the bar).
- * `back` replaces it with a back arrow for detail pages.
+ * Page header. Mobile shows the settings button on top-level pages (desktop has it in the bar). `back` replaces them with a back arrow for detail pages.
  */
 export function PageHeader({
   title,
@@ -162,25 +175,39 @@ export function PageHeader({
 }) {
   const nav = useNavigate()
   const { openSettings } = useLayout()
-  return (
-    <header className={cn('pt-[calc(env(safe-area-inset-top)+0.75rem)] sm:pt-8 pb-5', className)}>
-      <div className="flex items-center gap-2 min-h-11 -mx-1.5">
-        {back ? (
+  const kickerEl = kicker && <p className="text-[14px] text-dim font-medium first-letter:uppercase truncate">{kicker}</p>
+  const titleEl = title && <h1 className="t-title text-[36px] sm:text-[44px] break-words">{title}</h1>
+
+  // Detail pages: back arrow on its own row, title underneath (like iOS).
+  if (back) {
+    return (
+      <header className={cn('pt-[calc(env(safe-area-inset-top)+0.75rem)] sm:pt-8 pb-5', className)}>
+        <div className="flex items-center gap-2 min-h-11 -mx-1.5">
           <Button variant="ghost" size="icon" onClick={() => nav(-1)} aria-label="Retour" className="text-ink">
             <ChevronLeft size={24} />
           </Button>
-        ) : null}
-        <div className="flex-1 min-w-0 px-1.5">
-          {kicker && <p className="text-[14px] text-dim font-medium first-letter:uppercase truncate">{kicker}</p>}
+          <div className="flex-1 min-w-0 px-1.5">{kickerEl}</div>
+          {actions}
         </div>
-        {actions}
-        {!back && (
+        {title && <div className="mt-1">{titleEl}</div>}
+      </header>
+    )
+  }
+
+  // Top-level pages: the title shares its row with the Amis / Réglages buttons.
+  return (
+    <header className={cn('pt-[calc(env(safe-area-inset-top)+0.75rem)] sm:pt-8 pb-5', className)}>
+      <div className="flex items-center gap-3 min-h-11">
+        {/* With a kicker (e.g. the date), it shares the icons' row and the title goes below. */}
+        <div className="flex-1 min-w-0">{kicker ? kickerEl : titleEl}</div>
+        <div className="flex items-center shrink-0 -mr-1.5">
+          {actions}
           <Button variant="ghost" size="icon" onClick={openSettings} aria-label="Réglages" className="sm:hidden">
             <Settings size={21} />
           </Button>
-        )}
+        </div>
       </div>
-      {title && <h1 className="t-title text-[36px] sm:text-[44px] mt-1 break-words">{title}</h1>}
+      {kicker && title && <div className="mt-3">{titleEl}</div>}
     </header>
   )
 }
