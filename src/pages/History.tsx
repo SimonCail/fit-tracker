@@ -176,7 +176,7 @@ export function History() {
           <div className="grid gap-6 lg:grid-cols-2 2xl:grid-cols-3 lg:gap-x-8 items-start">
             {grouped.map(([date, list]) => (
               <section key={date} aria-label={format(parseISO(date), 'EEEE d MMMM yyyy', { locale: fr })}>
-                <h2 className="sticky top-0 sm:top-16 lg:static z-10 -mx-4 px-4 lg:mx-0 lg:px-0 py-2 bar lg:bg-transparent lg:backdrop-blur-none flex items-baseline gap-2 safe-top sm:pt-2">
+                <h2 className="sticky top-[env(safe-area-inset-top)] sm:top-16 lg:static z-10 -mx-4 px-4 lg:mx-0 lg:px-0 py-2 bar lg:bg-transparent lg:backdrop-blur-none flex items-baseline gap-2">
                   <span className="num text-[24px]">{format(parseISO(date), 'd')}</span>
                   <span className="t-heading text-[15px] first-letter:uppercase">{format(parseISO(date), 'EEEE', { locale: fr })}</span>
                   <span className="text-[14px] text-faint">{format(parseISO(date), 'MMMM yyyy', { locale: fr })}</span>
