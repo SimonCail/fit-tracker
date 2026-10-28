@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Camera, Check, ChevronRight, Copy, Search, Share2, UserPlus, Users, X } from 'lucide-react'
 import { differenceInCalendarDays, format, parseISO, startOfWeek } from 'date-fns'
@@ -11,12 +11,16 @@ import { useSettings } from '../store/settings'
 import {
   FriendError,
   acceptFriendRequest,
+  cachedFriendSessions,
+  cachedMyProfile,
   deleteFriendRequest,
   ensureProfile,
   listFriendSessions,
-  listFriends,
-  listIncomingRequests,
-  listOutgoingRequests,
+  refreshProfiles,
+  useFriends,
+  useIncomingRequests,
+  useOutgoingRequests,
+  withProfiles,
   normalizeCode,
   sendFriendRequest,
   setProfilePhoto,
@@ -35,40 +39,67 @@ export function FriendsPage() {
   const preferredName = useSettings(s => s.profile.name)
   const [params, setParams] = useSearchParams()
 
-  const [me, setMe] = useState<PublicProfile | null>(null)
-  const [friends, setFriends] = useState<Friend[] | null>(null)
-  const [incoming, setIncoming] = useState<FriendRequest[]>([])
-  const [outgoing, setOutgoing] = useState<FriendRequest[]>([])
+  const [me, setMe] = useState<PublicProfile | null>(() => (user ? cachedMyProfile(user.uid) : null))
+  // Live: a request sent or accepted by someone shows up here without reloading the page.
+  const friendsLive = useFriends()
+  const incoming = useIncomingRequests().data ?? []
+  const outgoing = useOutgoingRequests().data ?? []
+  const [profilesVersion, setProfilesVersion] = useState(0)
+  const friends = useMemo(
+    () => (friendsLive.data ? withProfiles(friendsLive.data) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- profilesVersion: the profile cache was filled
+    [friendsLive.data, profilesVersion],
+  )
   const [summaries, setSummaries] = useState<Record<string, FriendSummary>>({})
   const [error, setError] = useState<string | null>(null)
-
-  const reload = useCallback(async () => {
-    const [f, inc, out] = await Promise.all([listFriends(), listIncomingRequests(), listOutgoingRequests()])
-    setFriends(f)
-    setIncoming(inc)
-    setOutgoing(out)
-    // Light activity summary per friend, loaded after the list so the page shows up fast.
-    const entries = await Promise.all(
-      f.map(async friend => {
-        try {
-          return [friend.uid, summarize(await listFriendSessions(friend.uid, 40))] as const
-        } catch {
-          return [friend.uid, { lastDate: null, thisWeek: 0 }] as const
-        }
-      }),
-    )
-    setSummaries(Object.fromEntries(entries))
-  }, [])
 
   useEffect(() => {
     if (!user) return
     let alive = true
     ensureProfile(user, preferredName)
       .then(p => { if (alive) setMe(p) })
-      .then(reload)
-      .catch(e => { if (alive) setError((e as Error).message) })
+      .catch(e => { if (alive && !cachedMyProfile(user.uid)) setError((e as Error).message) })
     return () => { alive = false }
-  }, [user, preferredName, reload])
+  }, [user, preferredName])
+
+  // Names/photos and a light activity summary per friend: cached ones first, then refreshed in the background.
+  const friendIds = (friendsLive.data ?? []).map(f => f.uid).join(',')
+  useEffect(() => {
+    const ids = friendIds ? friendIds.split(',') : []
+    if (ids.length === 0) return
+    let alive = true
+    const fromCache: Record<string, FriendSummary> = {}
+    for (const id of ids) {
+      const c = cachedFriendSessions(id, 40)
+      if (c) fromCache[id] = summarize(c)
+    }
+    setSummaries(prev => ({ ...prev, ...fromCache }))
+    refreshProfiles(ids, true).then(() => { if (alive) setProfilesVersion(v => v + 1) })
+    for (const id of ids) {
+      listFriendSessions(id, 40)
+        .then(list => { if (alive) setSummaries(prev => ({ ...prev, [id]: summarize(list) })) })
+        .catch(() => { if (alive) setSummaries(prev => (prev[id] ? prev : { ...prev, [id]: { lastDate: null, thisWeek: 0 } })) })
+    }
+    return () => { alive = false }
+  }, [friendIds])
+
+  const [busyReq, setBusyReq] = useState<string | null>(null)
+  async function onRequest(r: FriendRequest, action: 'accept' | 'delete') {
+    if (busyReq) return
+    setBusyReq(r.id)
+    try {
+      if (action === 'accept' && me) await acceptFriendRequest(r, me)
+      else await deleteFriendRequest(r)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusyReq(null)
+    }
+  }
+
+  useEffect(() => {
+    if (friendsLive.error && !friendsLive.data) setError(friendsLive.error.message)
+  }, [friendsLive.error, friendsLive.data])
 
   // Shared link: /friends?code=ABC123 pre-fills the add form.
   const codeFromLink = params.get('code')
@@ -96,15 +127,17 @@ export function FriendsPage() {
                           size="icon-sm"
                           variant="secondary"
                           aria-label={`Refuser ${r.fromName}`}
-                          onClick={async () => { await deleteFriendRequest(r); await reload() }}
+                          disabled={busyReq === r.id}
+                          onClick={() => onRequest(r, 'delete')}
                         >
                           <X size={16} />
                         </Button>
                         <Button
                           size="sm"
-                          onClick={async () => { await acceptFriendRequest(r, me); await reload() }}
+                          disabled={busyReq === r.id}
+                          onClick={() => onRequest(r, 'accept')}
                         >
-                          <Check size={16} strokeWidth={2.5} /> Accepter
+                          <Check size={16} strokeWidth={2.5} /> {busyReq === r.id ? 'Ajout…' : 'Accepter'}
                         </Button>
                       </>
                     }
@@ -139,9 +172,8 @@ export function FriendsPage() {
             <AddFriend
               me={me}
               initialCode={codeFromLink ?? ''}
-              onDone={async () => {
+              onDone={() => {
                 if (codeFromLink) setParams({}, { replace: true })
-                await reload()
               }}
             />
           )}
@@ -156,7 +188,7 @@ export function FriendsPage() {
                     name={r.toName}
                     sub="n’a pas encore répondu"
                     actions={
-                      <Button size="sm" variant="ghost" onClick={async () => { await deleteFriendRequest(r); await reload() }}>
+                      <Button size="sm" variant="ghost" disabled={busyReq === r.id} onClick={() => onRequest(r, 'delete')}>
                         Annuler
                       </Button>
                     }
@@ -385,7 +417,7 @@ function MyProfile({ me, onChange }: { me: PublicProfile | null; onChange: (p: P
   )
 }
 
-function AddFriend({ me, initialCode, onDone }: { me: PublicProfile; initialCode: string; onDone: () => Promise<void> }) {
+function AddFriend({ me, initialCode, onDone }: { me: PublicProfile; initialCode: string; onDone: () => void }) {
   const [code, setCode] = useState(() => normalizeCode(initialCode))
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)

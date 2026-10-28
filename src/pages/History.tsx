@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ChevronRight, Moon, Search, Sunrise, X } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { Card, Disc, EmptyState, ErrorNote, Input, Skeleton, useConfirm } from '../components/ui'
 import { PageHeader } from '../components/Layout'
-import { deleteWeighIn, listSessions, listWeighIns } from '../lib/db'
+import { deleteWeighIn, useSessions, useWeighIns } from '../lib/db'
 import type { Session, WeighIn } from '../lib/types'
 import { frNum, fromKg } from '../lib/units'
 import { setTotalReps, setVolumeKg } from '../lib/setMath'
@@ -30,27 +30,17 @@ export function History() {
   const [params, setParams] = useSearchParams()
   const { unit } = useSettings()
   const confirm = useConfirm()
-  const [sessions, setSessions] = useState<Session[]>([])
-  const [weighIns, setWeighIns] = useState<WeighIn[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  // Live and shared with the other pages: instant when coming back, updates by itself.
+  const sessionsLive = useSessions()
+  const weighLive = useWeighIns()
+  const sessions = useMemo<Session[]>(() => sessionsLive.data ?? [], [sessionsLive.data])
+  const weighIns = useMemo<WeighIn[]>(() => weighLive.data ?? [], [weighLive.data])
+  const loading = (!sessionsLive.data && !sessionsLive.error) || (!weighLive.data && !weighLive.error)
+  const error = !sessionsLive.data && sessionsLive.error ? sessionsLive.error.message : null
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
   const dayFilter = params.get('d')
 
-  async function load() {
-    setError(null)
-    try {
-      const [s, w] = await Promise.all([listSessions(200), listWeighIns(240)])
-      setSessions(s)
-      setWeighIns(w)
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setLoading(false)
-    }
-  }
-  useEffect(() => { load() }, [])
 
   const items = useMemo<Item[]>(() => {
     const all: Item[] = [
@@ -98,7 +88,6 @@ export function History() {
     const ok = await confirm({ title: 'Supprimer cette pesée ?', confirmLabel: 'Supprimer', danger: true })
     if (!ok) return
     await deleteWeighIn(id)
-    await load()
   }
 
   const userBwKg = weighIns[0]?.weight ?? 0

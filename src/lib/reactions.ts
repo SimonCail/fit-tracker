@@ -1,6 +1,7 @@
-import { collection, doc, getDocs, serverTimestamp, Timestamp, writeBatch } from 'firebase/firestore'
+import { collection, deleteDoc, doc, getDocs, serverTimestamp, Timestamp, writeBatch } from 'firebase/firestore'
 import { auth, db } from './firebase'
 import { pingReaction } from './friendNotify'
+import { cachedProfile, getProfile } from './friends'
 
 /**
  * Reactions on a session: users/{owner}/sessions/{sessionId}/reactions/{reactorUid}.
@@ -29,7 +30,7 @@ export function firstEmoji(text: string): string | null {
 
 export async function listReactions(owner: string, sessionId: string): Promise<Reaction[]> {
   const snap = await getDocs(reactionsCol(owner, sessionId))
-  return snap.docs
+  const list = snap.docs
     .map(d => {
       const data = d.data()
       return {
@@ -41,6 +42,29 @@ export async function listReactions(owner: string, sessionId: string): Promise<R
     })
     .filter(r => r.emoji)
     .sort((a, b) => a.at - b.at)
+  return dropDeletedAccounts(owner, sessionId, list)
+}
+
+/**
+ * A deleted account has no public profile any more. Its reactions are hidden for everyone,
+ * and removed for good when the owner of the session sees them (the cleanup at deletion
+ * can miss some: sessions of ex-friends, an interrupted deletion, an old app version…).
+ */
+async function dropDeletedAccounts(owner: string, sessionId: string, list: Reaction[]): Promise<Reaction[]> {
+  const me = auth.currentUser?.uid
+  const exists = await Promise.all(
+    list.map(async r => {
+      if (r.uid === me) return true
+      const known = cachedProfile(r.uid)
+      const p = known !== undefined ? known : await getProfile(r.uid).catch(() => undefined)
+      return p !== null // unknown (offline, error) → keep it
+    }),
+  )
+  const gone = list.filter((_, i) => !exists[i])
+  if (gone.length && me === owner) {
+    for (const r of gone) void deleteDoc(doc(reactionsCol(owner, sessionId), r.uid)).catch(() => {})
+  }
+  return list.filter((_, i) => exists[i])
 }
 
 /**

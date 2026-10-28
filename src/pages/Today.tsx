@@ -21,7 +21,7 @@ import {
 } from '../components/ui'
 import { PageHeader } from '../components/Layout'
 import { useLayout } from '../components/layoutContext'
-import { deleteWeighIn, findOrCreateSessionOnDate, listSessions, listWeighIns, setWeighIn } from '../lib/db'
+import { deleteWeighIn, findOrCreateSessionOnDate, setWeighIn, useSessions, useWeighIns } from '../lib/db'
 import type { Session, WeighIn, WeighSlot } from '../lib/types'
 import { frNum, fromKg, parseDecimal, round, toKg } from '../lib/units'
 import { setTotalReps, setVolumeKg } from '../lib/setMath'
@@ -39,25 +39,15 @@ export function Today() {
   const { openNewSession } = useLayout()
   const { unit, profile, weeklyPlan, reminders } = useSettings()
   const weeklyGoal = useSettings(s => s.weeklyGoal ?? 2)
-  const [loading, setLoading] = useState(true)
-  const [sessions, setSessions] = useState<Session[]>([])
-  const [weighIns, setWeighIns] = useState<WeighIn[]>([])
-  const [error, setError] = useState<string | null>(null)
+  // Live and shared with the other pages: instant when coming back, updates by itself.
+  const sessionsLive = useSessions()
+  const weighLive = useWeighIns()
+  const sessions = useMemo<Session[]>(() => sessionsLive.data ?? [], [sessionsLive.data])
+  const weighIns = useMemo<WeighIn[]>(() => weighLive.data ?? [], [weighLive.data])
+  const loading = (!sessionsLive.data && !sessionsLive.error) || (!weighLive.data && !weighLive.error)
+  const error = !sessionsLive.data && sessionsLive.error ? sessionsLive.error.message : null
   const [starting, setStarting] = useState(false)
 
-  async function load() {
-    setError(null)
-    try {
-      const [s, w] = await Promise.all([listSessions(120), listWeighIns(120)])
-      setSessions(s)
-      setWeighIns(w)
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setLoading(false)
-    }
-  }
-  useEffect(() => { load() }, [])
 
   const todayKey = todayIso()
   const todaySessions = sessions.filter(s => s.date === todayKey).sort((a, b) => b.createdAt - a.createdAt)
@@ -142,7 +132,7 @@ export function Today() {
           onStreakClick={() => nav('/evolution')}
         />
 
-        <WeightBlock unit={unit} weighIns={weighIns} onChanged={load} />
+        <WeightBlock unit={unit} weighIns={weighIns} onChanged={() => {}} />
         </div>
 
         <div className="contents lg:flex lg:flex-col lg:gap-8">

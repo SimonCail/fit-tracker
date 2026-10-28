@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
+  getRedirectResult,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
 } from 'firebase/auth'
 import { ChevronLeft, Mail } from 'lucide-react'
 import { motion } from 'framer-motion'
@@ -12,6 +14,11 @@ import { auth, isConfigured } from '../lib/firebase'
 import { Button, Input, Label } from '../components/ui'
 
 type Mode = 'choose' | 'email'
+
+/** Installed on the home screen: a popup would leave the app, so Google sign-in goes by redirect. */
+function isStandalone() {
+  return window.matchMedia?.('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true
+}
 
 export function Login() {
   const [mode, setMode] = useState<Mode>('choose')
@@ -21,11 +28,32 @@ export function Login() {
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
 
+  // Coming back from a Google redirect: success is handled by onAuthStateChanged, show only errors.
+  useEffect(() => {
+    getRedirectResult(auth).catch(e => setError(humanAuthError(e)))
+  }, [])
+
   async function onGoogle() {
     setError(null)
     setLoading(true)
+    const provider = new GoogleAuthProvider()
+    provider.setCustomParameters({ prompt: 'select_account' })
     try {
-      await signInWithPopup(auth, new GoogleAuthProvider())
+      if (isStandalone()) {
+        await signInWithRedirect(auth, provider)
+        return // the page navigates away
+      }
+      try {
+        await signInWithPopup(auth, provider)
+      } catch (e) {
+        // Popup blocked or not supported (some in-app browsers): fall back to a full-page redirect.
+        const code = (e as { code?: string })?.code
+        if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') {
+          await signInWithRedirect(auth, provider)
+          return
+        }
+        throw e
+      }
     } catch (e) {
       setError(humanAuthError(e))
     } finally {
@@ -39,8 +67,8 @@ export function Login() {
     setInfo(null)
     setLoading(true)
     try {
-      if (create) await createUserWithEmailAndPassword(auth, email, password)
-      else await signInWithEmailAndPassword(auth, email, password)
+      if (create) await createUserWithEmailAndPassword(auth, email.trim(), password)
+      else await signInWithEmailAndPassword(auth, email.trim(), password)
     } catch (e) {
       setError(humanAuthError(e))
     } finally {
@@ -57,8 +85,8 @@ export function Login() {
     }
     setLoading(true)
     try {
-      await sendPasswordResetEmail(auth, email)
-      setInfo(`Lien envoyé à ${email}. Ouvre-le pour choisir un nouveau mot de passe ; tes données ne changent pas.`)
+      await sendPasswordResetEmail(auth, email.trim())
+      setInfo(`Lien envoyé à ${email.trim()}. Ouvre-le pour choisir un nouveau mot de passe ; tes données ne changent pas.`)
     } catch (e) {
       setError(humanAuthError(e))
     } finally {
@@ -180,6 +208,7 @@ function humanAuthError(e: unknown): string {
     case 'auth/cancelled-popup-request': return 'Plusieurs fenêtres de connexion ouvertes. Réessaie.'
     case 'auth/web-storage-unsupported': return 'Le stockage local est désactivé. Active les cookies ou utilise ton e-mail.'
     case 'auth/operation-not-supported-in-this-environment': return 'Connexion Google indisponible ici. Utilise ton e-mail.'
+    case 'auth/account-exists-with-different-credential': return 'Un compte existe déjà avec cet e-mail : connecte-toi avec ton mot de passe.'
     default:
       return (e as Error)?.message ?? 'Erreur inconnue.'
   }

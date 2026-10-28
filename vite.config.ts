@@ -28,6 +28,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,webp,woff2}'],
+        // Google sign-in pages (/__/auth, proxied to Firebase by vercel.json) and the API
+        // must reach the network, not the app's index.html.
+        navigateFallbackDenylist: [/^\/__\//, /^\/api\//],
       },
       devOptions: {
         enabled: false,

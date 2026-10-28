@@ -6,7 +6,7 @@ import { fr } from 'date-fns/locale'
 import { Button, Card, Disc, EmptyState, ErrorNote, Modal, ModalContent, ModalTitle, Segmented, SectionTitle, Skeleton, Tag, useConfirm } from '../components/ui'
 import { PageHeader } from '../components/Layout'
 import { listSessions } from '../lib/db'
-import { getFriend, isPermissionDenied, listFriendSessions, removeFriend, type Friend } from '../lib/friends'
+import { cachedFriendSessions, cachedProfile, getFriend, isPermissionDenied, listFriendSessions, removeFriend, type Friend } from '../lib/friends'
 import { computeRecords, runningRecords, type ExerciseRecord } from '../lib/records'
 import { setMaxWeightKg, setVolumeKg } from '../lib/setMath'
 import { frNum, fromKg, type Unit } from '../lib/units'
@@ -27,8 +27,12 @@ export function FriendProfilePage() {
   const nav = useNavigate()
   const confirm = useConfirm()
   const unit = useSettings(s => s.unit)
-  const [friend, setFriend] = useState<Friend | null>(null)
-  const [theirs, setTheirs] = useState<Session[] | null>(null)
+  // Shown at once from what the Amis page already loaded, then refreshed.
+  const [friend, setFriend] = useState<Friend | null>(() => {
+    const p = cachedProfile(uid)
+    return p ? { uid, name: p.name, photo: p.photo, since: 0 } : null
+  })
+  const [theirs, setTheirs] = useState<Session[] | null>(() => cachedFriendSessions(uid) ?? null)
   const [mine, setMine] = useState<Session[]>([])
   const [error, setError] = useState<string | null>(null)
   const [gone, setGone] = useState(false)
@@ -36,15 +40,14 @@ export function FriendProfilePage() {
 
   useEffect(() => {
     let alive = true
+    listSessions(500).then(m => { if (alive) setMine(m) }).catch(() => {})
     ;(async () => {
-      const f = await getFriend(uid)
+      // In parallel: the friendship check doesn't hold up the sessions.
+      const [f, t] = await Promise.all([getFriend(uid), listFriendSessions(uid)])
       if (!alive) return
       if (!f) { setGone(true); return }
       setFriend(f)
-      const [t, m] = await Promise.all([listFriendSessions(uid), listSessions(500).catch(() => [] as Session[])])
-      if (!alive) return
       setTheirs(t)
-      setMine(m)
     })().catch(e => {
       if (!alive) return
       if (isPermissionDenied(e)) setGone(true)
@@ -112,7 +115,7 @@ export function FriendProfilePage() {
             <span className="min-w-0 break-words">{friend.name}</span>
           </span>
         }
-        kicker={`Amis depuis ${format(friend.since, 'MMMM yyyy', { locale: fr })}`}
+        kicker={friend.since ? `Amis depuis ${format(friend.since, 'MMMM yyyy', { locale: fr })}` : undefined}
       />
 
       <div className="grid grid-cols-3 gap-2 min-w-0">

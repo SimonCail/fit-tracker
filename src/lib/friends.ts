@@ -18,6 +18,7 @@ import { auth, db } from './firebase'
 import type { Session } from './types'
 import { parseSession } from './db'
 import { pingFriendRequest } from './friendNotify'
+import { readLive, useLive, type LiveSource } from './live'
 
 /**
  * Friends.
@@ -82,6 +83,19 @@ const friendRef = (owner: string, friend: string) => doc(db, 'users', owner, 'fr
 
 /** Make sure the signed-in user has a public profile with a friend code, and keep the name fresh. */
 export async function ensureProfile(user: User, preferredName: string | null): Promise<PublicProfile> {
+  const p = await ensureProfileUncached(user, preferredName)
+  myProfile = p
+  profileCache.set(p.uid, p)
+  return p
+}
+
+let myProfile: PublicProfile | null = null
+/** Last known own profile (instant), refreshed by ensureProfile. */
+export function cachedMyProfile(uid: string): PublicProfile | null {
+  return myProfile?.uid === uid ? myProfile : null
+}
+
+async function ensureProfileUncached(user: User, preferredName: string | null): Promise<PublicProfile> {
   const name = displayNameFor(user, preferredName)
   const snap = await getDoc(profileRef(user.uid))
   if (snap.exists()) {
@@ -109,14 +123,22 @@ export async function ensureProfile(user: User, preferredName: string | null): P
 
 export async function getProfile(uid: string): Promise<PublicProfile | null> {
   const snap = await getDoc(profileRef(uid))
-  if (!snap.exists()) return null
+  if (!snap.exists()) { profileCache.set(uid, null); return null }
   const d = snap.data()
-  return {
+  const p = {
     uid,
     name: String(d.name ?? 'Sportif'),
     code: String(d.code ?? ''),
     photo: typeof d.photo === 'string' ? d.photo : null,
   }
+  profileCache.set(uid, p)
+  return p
+}
+
+/** Public profiles already fetched this session (names and photos of friends). */
+const profileCache = new Map<string, PublicProfile | null>()
+export function cachedProfile(uid: string): PublicProfile | null | undefined {
+  return profileCache.get(uid)
 }
 
 /** Set or remove (null) the profile photo — a small JPEG data URL, see lib/photo.ts. */
@@ -143,14 +165,29 @@ function parseRequest(id: string, d: Record<string, unknown>): FriendRequest {
   }
 }
 
+function requestsSource(dir: 'to' | 'from'): LiveSource<FriendRequest[]> {
+  const uid = me()
+  return {
+    key: `requests-${dir}:${uid}`,
+    query: () => query(collection(db, 'friendRequests'), where(dir, '==', uid)),
+    map: snap => snap.docs.map(d => parseRequest(d.id, d.data())).sort((a, b) => b.createdAt - a.createdAt),
+  }
+}
+
+/** Live: requests I received / sent. They appear and disappear by themselves. */
+export function useIncomingRequests() {
+  return useLive(auth.currentUser ? requestsSource('to') : null)
+}
+export function useOutgoingRequests() {
+  return useLive(auth.currentUser ? requestsSource('from') : null)
+}
+
 export async function listIncomingRequests(): Promise<FriendRequest[]> {
-  const snap = await getDocs(query(collection(db, 'friendRequests'), where('to', '==', me())))
-  return snap.docs.map(d => parseRequest(d.id, d.data())).sort((a, b) => b.createdAt - a.createdAt)
+  return readLive(requestsSource('to'))
 }
 
 export async function listOutgoingRequests(): Promise<FriendRequest[]> {
-  const snap = await getDocs(query(collection(db, 'friendRequests'), where('from', '==', me())))
-  return snap.docs.map(d => parseRequest(d.id, d.data())).sort((a, b) => b.createdAt - a.createdAt)
+  return readLive(requestsSource('from'))
 }
 
 export async function countIncomingRequests(): Promise<number> {
@@ -211,24 +248,48 @@ export async function removeFriend(friendUid: string) {
   await batch.commit()
 }
 
-export async function listFriends(): Promise<Friend[]> {
-  const snap = await getDocs(collection(db, 'users', me(), 'friends'))
-  const friends = snap.docs.map(d => ({
-    uid: d.id,
-    name: String(d.data().name ?? 'Sportif'),
-    since: toMs(d.data().since),
-    photo: null as string | null,
-  }))
-  // Names may have changed since the friendship started: refresh from public profiles.
+function friendsSource(): LiveSource<Friend[]> {
+  const uid = me()
+  return {
+    key: `friends:${uid}`,
+    query: () => query(collection(db, 'users', uid, 'friends')),
+    map: snap => snap.docs.map(d => ({
+      uid: d.id,
+      name: String(d.data().name ?? 'Sportif'),
+      since: toMs(d.data().since),
+      photo: null as string | null,
+    })),
+  }
+}
+
+/** Use the latest public name/photo when we have it (names can change after the friendship started). */
+export function withProfiles(friends: Friend[]): Friend[] {
+  return friends
+    .map(f => {
+      const p = profileCache.get(f.uid)
+      return p ? { ...f, name: p.name, photo: p.photo } : f
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, 'fr'))
+}
+
+/** Live list of friends (names/photos from the profile cache; call refreshProfiles to fill it). */
+export function useFriends() {
+  return useLive(auth.currentUser ? friendsSource() : null)
+}
+
+/** Fetch the public profiles we don't have yet. Resolves once they're in the cache. */
+export async function refreshProfiles(uids: string[], force = false) {
   await Promise.all(
-    friends.map(async f => {
-      try {
-        const p = await getProfile(f.uid)
-        if (p) { f.name = p.name; f.photo = p.photo }
-      } catch { /* keep the stored name */ }
-    }),
+    uids
+      .filter(u => force || !profileCache.has(u))
+      .map(u => getProfile(u).catch(() => undefined)),
   )
-  return friends.sort((a, b) => a.name.localeCompare(b.name, 'fr'))
+}
+
+export async function listFriends(): Promise<Friend[]> {
+  const friends = await readLive(friendsSource())
+  await refreshProfiles(friends.map(f => f.uid))
+  return withProfiles(friends)
 }
 
 export async function getFriend(friendUid: string): Promise<Friend | null> {
@@ -251,7 +312,21 @@ export async function getFriend(friendUid: string): Promise<Friend | null> {
  * Until it is created, Firestore answers "failed-precondition": we then fall back to an
  * unordered read of everything shared (correct, just heavier) so the page still works.
  */
+const friendSessionsCache = new Map<string, { max: number; list: Session[] }>()
+/** Last loaded sessions of a friend (instant, at least `max` long if known), or undefined. */
+export function cachedFriendSessions(friendUid: string, max = 1000): Session[] | undefined {
+  const c = friendSessionsCache.get(friendUid)
+  return c && c.max >= max ? c.list.slice(0, max) : undefined
+}
+
 export async function listFriendSessions(friendUid: string, max = 1000): Promise<Session[]> {
+  const list = await fetchFriendSessions(friendUid, max)
+  const prev = friendSessionsCache.get(friendUid)
+  if (!prev || max >= prev.max) friendSessionsCache.set(friendUid, { max, list })
+  return list
+}
+
+async function fetchFriendSessions(friendUid: string, max: number): Promise<Session[]> {
   const col = collection(db, 'users', friendUid, 'sessions')
   let docs
   try {

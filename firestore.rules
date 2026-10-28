@@ -40,7 +40,8 @@ service cloud.firestore {
           && request.resource.data.emoji is string
           && request.resource.data.emoji.size() > 0 && request.resource.data.emoji.size() <= 32
           && request.resource.data.name is string && request.resource.data.name.size() <= 40;
-        allow delete: if signedIn() && request.auth.uid == reactorUid;
+        // The reactor removes theirs; the session owner can clean reactions left by deleted accounts.
+        allow delete: if signedIn() && (request.auth.uid == reactorUid || request.auth.uid == uid);
       }
     }
 

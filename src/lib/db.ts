@@ -21,6 +21,7 @@ import type { Exercise, ExerciseSet, Session, SessionType, SetDrop, WeighIn, Wei
 import { isBodyweightExerciseName } from './exerciseName'
 import { setMaxWeightKg, setVolumeKg } from './setMath'
 import { isOffline, trackWrite } from './sync'
+import { peekLive, readLive, useLive, type LiveSource } from './live'
 import type { DocumentReference, Query } from 'firebase/firestore'
 
 /** Reads go straight to the local cache when the device knows it is offline. */
@@ -88,18 +89,36 @@ function parseWeighIn(id: string, data: Record<string, unknown>): WeighIn {
   }
 }
 
+const byDateDesc = (a: Session, b: Session) =>
+  a.date !== b.date ? b.date.localeCompare(a.date) : b.createdAt - a.createdAt
+
+/** All my sessions (most recent 1000), kept live and shared by every page. */
+function sessionsSource(): LiveSource<Session[]> {
+  return {
+    key: `sessions:${uid()}`,
+    query: () => query(sessionsCol(), orderBy('createdAt', 'desc'), limit(1000)),
+    map: snap => snap.docs.map(d => parseSession(d.id, d.data())).sort(byDateDesc),
+  }
+}
+
+/** Live list of my sessions, most recent first. `data` is undefined while loading. */
+export function useSessions() {
+  return useLive(auth.currentUser ? sessionsSource() : null)
+}
+
 export async function listSessions(max = 60): Promise<Session[]> {
-  const q = query(sessionsCol(), orderBy('createdAt', 'desc'), limit(max))
-  const snap = await readDocs(q)
-  return snap.docs
-    .map(d => parseSession(d.id, d.data()))
-    .sort((a, b) => {
-      if (a.date !== b.date) return b.date.localeCompare(a.date)
-      return b.createdAt - a.createdAt
-    })
+  try {
+    return (await readLive(sessionsSource())).slice(0, max)
+  } catch {
+    // Listener unavailable: plain read.
+    const snap = await readDocs(query(sessionsCol(), orderBy('createdAt', 'desc'), limit(max)))
+    return snap.docs.map(d => parseSession(d.id, d.data())).sort(byDateDesc)
+  }
 }
 
 export async function getSession(id: string): Promise<Session | null> {
+  const known = peekLive(sessionsSource())?.find(s => s.id === id)
+  if (known) return known
   const snap = await readDoc(sessionRef(id))
   if (!snap.exists()) return null
   return parseSession(snap.id, snap.data())
@@ -330,12 +349,26 @@ export async function deleteSetDrop(
   )
 }
 
+function weighInsSource(): LiveSource<WeighIn[]> {
+  return {
+    key: `weighIns:${uid()}`,
+    query: () => query(weighInsCol(), orderBy('createdAt', 'desc'), limit(600)),
+    map: snap => snap.docs.map(d => parseWeighIn(d.id, d.data())).sort((a, b) => b.date.localeCompare(a.date)),
+  }
+}
+
+/** Live list of my weigh-ins, most recent first. */
+export function useWeighIns() {
+  return useLive(auth.currentUser ? weighInsSource() : null)
+}
+
 export async function listWeighIns(max = 180): Promise<WeighIn[]> {
-  const q = query(weighInsCol(), orderBy('createdAt', 'desc'), limit(max))
-  const snap = await readDocs(q)
-  return snap.docs
-    .map(d => parseWeighIn(d.id, d.data()))
-    .sort((a, b) => b.date.localeCompare(a.date))
+  try {
+    return (await readLive(weighInsSource())).slice(0, max)
+  } catch {
+    const snap = await readDocs(query(weighInsCol(), orderBy('createdAt', 'desc'), limit(max)))
+    return snap.docs.map(d => parseWeighIn(d.id, d.data())).sort((a, b) => b.date.localeCompare(a.date))
+  }
 }
 
 /** Set (create or overwrite) a weigh-in for a specific date/slot. Enforces ≤1 per slot/day. */
