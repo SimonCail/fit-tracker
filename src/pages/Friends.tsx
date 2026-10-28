@@ -30,7 +30,7 @@ import {
   type PublicProfile,
 } from '../lib/friends'
 import type { Session } from '../lib/types'
-import { fileToAvatar } from '../lib/photo'
+import { AvatarCropper } from '../components/AvatarCropper'
 
 type FriendSummary = { lastDate: string | null; thisWeek: number }
 
@@ -331,21 +331,22 @@ function MyProfile({ me, onChange }: { me: PublicProfile | null; onChange: (p: P
     } catch { /* cancelled */ }
   }
 
-  async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+  // Picked photo waiting to be framed in the cropper.
+  const [pending, setPending] = useState<File | null>(null)
+
+  function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     e.target.value = '' // allow picking the same file again
     if (!file || !me) return
-    setBusy(true)
     setPhotoError(null)
-    try {
-      const photo = await fileToAvatar(file)
-      await setProfilePhoto(photo)
-      onChange({ ...me, photo })
-    } catch (err) {
-      setPhotoError((err as Error).message || 'Envoi impossible.')
-    } finally {
-      setBusy(false)
-    }
+    setPending(file)
+  }
+
+  async function savePhoto(photo: string) {
+    if (!me) return
+    await setProfilePhoto(photo)
+    onChange({ ...me, photo })
+    setPending(null)
   }
 
   async function onRemovePhoto() {
@@ -389,6 +390,7 @@ function MyProfile({ me, onChange }: { me: PublicProfile | null; onChange: (p: P
               </div>
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onPick} />
             </div>
+            <AvatarCropper file={pending} onCancel={() => setPending(null)} onConfirm={savePhoto} />
             {busy && <p className="text-[13px] text-dim mt-2" role="status">Enregistrement…</p>}
             {photoError && <p className="text-[13px] text-danger mt-2" role="alert">{photoError}</p>}
 
